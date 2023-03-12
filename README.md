@@ -5,6 +5,7 @@ Linux BASH script to automatically download and update qbittorrent-nox to the la
 Currently, it is mainly intended for updating already installed qBitTorrent-nox on DietPi linux.
 It is strongly suggested to install qbittorrent-nox using 'dietpi-software' script because it performs all config needed.
 
+This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable, because Debian apt package versions are not always up to date.
 
 
 ### The way it works
