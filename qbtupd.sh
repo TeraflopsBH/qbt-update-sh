@@ -33,6 +33,12 @@ echo
 echo -e " ${YELLOW}Teraflops${NC} ${LCYAN}DietPi qBitTorrent-nox-static${NC} ${YELLOW}Update Script${NC}";
 echo
 
+# Check if the script was run with root privileges
+if [[ $EUID -ne 0 ]]; then
+   echo -e " ${DB_RED}Aborting.${NC} ${LRED}This script must be run as root${NC}\n"
+   exit 1
+fi
+
 # Detect the system architecture
 detected_arch="$(uname -m)"
 
