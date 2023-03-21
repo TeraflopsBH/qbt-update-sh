@@ -29,11 +29,11 @@ Updating procedure would start only if all three requirements were met:
 2. 'DietPi' 'qBitTorrent' version found or installed.
 3. 'qBitTorrent' service marked as inactive.
 
-Script would then try to detect host system achitecture and offer user to accept detected architecture by typing ' 0 ' and pressing ' Enter ', along with choice to manually chose system architecture by offering two most used architectures if he disagrees with one that was detected.
+Script would then try to detect host system achitecture and offer user to accept detected architecture by typing '0' and pressing 'Enter', along with choice to manually chose system architecture by offering two most used architectures if he disagrees with one that was detected.
 
 'This part will be expanded further to broaden the menu options to cover all architectures qbittorrent-nox-static supports'
 
-Pressing ' Enter ' without entering any of options listed, or chosing option to ' Abort ' would abort the script.
+Pressing 'Enter' without entering any of options listed, or chosing option to 'Abort' would abort the script.
 
 ### How to use
 
