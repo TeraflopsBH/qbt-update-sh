@@ -1,11 +1,10 @@
-# qbt-update-sh
+# qBitTorrent Updater (`qbt-update-sh`)
 
 ## Intro
-Linux BASH script to automatically download and update qbittorrent-nox to the latest version available.
-Currently, it is mainly intended for updating already installed qBitTorrent-nox on DietPi linux.
-It is strongly suggested to install qbittorrent-nox using 'dietpi-software' script because it performs all config needed.
+Linux BASH script which provides an option to automatically download and update qbittorrent-nox to the latest version available.
+Currently, it is mainly intended for installing and updating already installed qBitTorrent-nox on `DietPi` linux.
 
-This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable, because Debian apt package versions are not always up to date.
+This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable, main reason being Debian apt package versions are not always up to date.
 
 
 ### The way it works
@@ -34,6 +33,7 @@ Script would then try to detect host system achitecture and offer user to accept
 `This part will be expanded further to broaden the menu options to cover all architectures qbittorrent-nox-static supports`
 
 Pressing `Enter` without entering any of options listed, or chosing option to `Abort` would abort the script.
+
 
 ### How to use
 
