@@ -97,40 +97,8 @@ while true; do
     fi
 done
 
-
-echo -ne " \n\n${GREEN}Initializing the script...${NC} "
-sleep 1
-echo -e " ${B_CYAN} DONE ${NC}"
-sleep 2
-
 #
 # Prompt user to continue... END #
-
-# Check for ROOT/SUDO privilege START #
-#
-
-echo -e "\n ${B_CYAN} INFO ${NC} - ${GREEN}Checking for ${NC}${LBLUE}SUDO${NC}\n"
-sleep 1
-if [[ $EUID -ne 0 ]]; then
-   echo -e " ${B_RED} WARN ${NC} - ${LYELLOW}This script must be run ${ULINE}with ROOT privileges${NC}\n"
-   sleep 1
-   # prompt user to run with sudo
-   echo -ne " ${B_RED} WARN ${NC} - ${LGREEN}Do you want to run this script with SUDO? (y/n): ${NC}"
-   read -r runwithsudo
-   if [[ $runwithsudo == "y" || $runwithsudo == "Y" ]]; then
-       sudo "$0" "$@"
-   else
-       echo -e " ${B_RED} WARN ${NC} - ${LRED}Cannot run without elevated privileges.${NC} ${DB_RED} Aborting! ${NC}"
-       sleep 1
-       exit 1  # exit the script with an error status
-   fi
-fi
-
-echo -e " ${B_CYAN} INFO ${NC} - ${LBLUE}SUDO${NC} ${GREEN}is in da house. Proceeding...\n${NC}"
-sleep 1
-
-#
-# Check for ROOT/SUDO privilege END #
 
 # Functions Block START #
 #
@@ -275,6 +243,47 @@ function qbtupdater() {
 
 #
 # Functions Block END #
+
+# Reserved space for further update START #
+#
+
+echo -ne " \n\n${GREEN}Initializing the script...${NC} "
+sleep 1
+echo -e " ${B_CYAN} DONE ${NC}"
+sleep 2
+
+#
+# Reserved space for further update END #
+
+# Check for ROOT/SUDO privilege START #
+#
+
+echo
+echo -e "\n ${B_CYAN} INFO ${NC} - ${GREEN}Checking for ${NC}${LBLUE}SUDO${NC}\n"
+sleep 1
+
+if [[ $EUID -ne 0 ]]; then
+   echo -e " ${B_RED} WARN ${NC} - ${LYELLOW}This script must be run ${ULINE}with ROOT privileges${NC}\n"
+   sleep 1
+   # prompt user to run with sudo
+   echo -ne " ${B_RED} WARN ${NC} - ${LGREEN}Do you want to run this script with SUDO? (y/n): ${NC}"
+   read -r runwithsudo
+   if [[ $runwithsudo == "y" || $runwithsudo == "Y" ]]; then
+       cd "$PWD" && exec sudo -E bash "$0" "$@"
+   else
+       echo -e " ${B_RED} WARN ${NC} - ${LRED}Cannot run without elevated privileges.${NC} ${DB_RED} Aborting! ${NC}"
+       sleep 1
+       exit 1  # exit the script with an error status
+   fi
+fi
+
+echo -e " ${B_CYAN} INFO ${NC} - ${LBLUE}SUDO${NC} ${GREEN}is in da house. Proceeding...\n${NC}"
+sleep 1
+
+
+#
+# Check for ROOT/SUDO privilege END #
+
 
 # Check if host system is DietPi START #
 #
