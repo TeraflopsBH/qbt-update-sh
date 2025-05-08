@@ -1,5 +1,7 @@
 # qBitTorrent Updater (`qbt-update-sh`)
 
+## NOTE - `Updated with new functions and option to choose which libtorrent version to use`
+
 ## Intro
 Linux BASH script which provides an option to automatically download and update qbittorrent-nox to the latest version available.
 Currently, it is mainly intended for installing and updating already installed qBitTorrent-nox on `DietPi` linux.
