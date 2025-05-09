@@ -1,12 +1,20 @@
 #!/bin/bash
 
-# DietPi qBitTorrent Updater script by Teraflops
-# Feel free to use and/or modify this script, as per your requirements.
-# Author doesn't hold any responsibility for any mishap and/or damage it causes.
+################################################################
+###                                                          ###
+#     DietPi qBitTorrent Updater script by Teraflops v.1.2     #
+###                                                          ###
+################################################################
 
-# Text Formatting variables START #
+# Feel free to use and/or modify this script, as per your needs.
+# Author doesn't hold any accountability nor responsibility for
+# any mishap and/or damage this script causes.
+
+################################################################
+## BASIC SCRIPT VARIABLES ######################################
+
+## Text Formatting variables ########################## START ##
 # 
-
 # Standard Colors      # Light Colors          # Dark Colors
 RED='\033[0;91m'       LRED='\033[1;31m'       DRED='\033[0;31m'
 GREEN='\033[0;92m'     LGREEN='\033[1;32m'     DGREEN='\033[0;32m'
@@ -42,11 +50,11 @@ MSG_IG=" ${B_CYAN} INFO ${NC} - ${LGREEN}"
 MSG_IR=" ${B_CYAN} INFO ${NC} - ${LRED}"
 MSG_IY=" ${B_CYAN} INFO ${NC} - ${LYELLOW}"
 #
-# Text Formatting variables END #
+## Text Formatting variables ############################ END ##
 
 clear
 
-# ASCII Logo START #
+## ASCII logo ######################################### START ##
 #
 cat << "EOF"
 
@@ -61,9 +69,9 @@ cat << "EOF"
 
 EOF
 #
-# ASCII Logo END #
+## ASCII logo ########################################### END ##
 
-# Intro START #
+## Intro ############################################## START ##
 #
 echo
 echo -e " ${DB_RED}  INTRODUCTION                                          ${NC}"
@@ -83,9 +91,9 @@ echo -e " ${DB_RED}                                                        ${NC}
 echo
 echo
 #
-# Intro END #
+## Intro ################################################ END ##
 
-# Prompt user to continue... START #
+## Prompt user to continue ############################ START ##
 #
 while true; do
     echo -ne "${MSG_WG}Do you want proceed with this script (y/n): ${NC}"
@@ -102,11 +110,13 @@ while true; do
     fi
 done
 #
-# Prompt user to continue... END #
+## Prompt user to continue ############################## END ##
 
-# Functions Block START #
+################################################################
+## FUNCTIONS ###################################################
+
+## Check Internet availability ######################## START ##
 #
-# Check Internet availability
 function check_internet() {
     local host="cloudflare.com"
 
@@ -116,8 +126,11 @@ function check_internet() {
         return 1  # offline
     fi
 }
+#
+## Check Internet availability ########################## END ##
 
-# Host system architecture detection/selection function
+## Detect host system architecture #################### START ##
+#
 function setsysarch() {
     sleep 1
     # Detect the system architecture
@@ -186,8 +199,10 @@ function setsysarch() {
     done
                 
 }
+#
+## Detect host system architecture ###################### END ##
 
-# qBt stopper function
+## qBitTorrent stopper ################################ START ##
 #
 function qbtstopper() {
     sleep 1
@@ -211,11 +226,10 @@ function qbtstopper() {
     done
 }
 #
-######################################
+## qBitTorrent stopper ################################## END ##
 
-# Query versions from the source
+## Query the latest version info & links ############## START ##
 #
-
 function fetchqbtlinks() {
     
     # Fetch JSON and extract values
@@ -233,9 +247,9 @@ function fetchqbtlinks() {
     latestdlink_libt_2_0="https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-${latestver_qbt}_v${latestver_libt_2_0}/${arch}-qbittorrent-nox"
 }
 #
-###################################
+## Query the latest version info & links ################ END ##
 
-# Ping user for libtorrent version choice #
+## Prompt user for libtorrent version choice ########## START ##
 #
 function libtorchoice() {
     while true; do
@@ -266,9 +280,9 @@ function libtorchoice() {
     done
 }
 #
-####################################
+## Prompt user for libtorrent version choice ############ END ##
 
-# Update function
+## qBitTorrent Update function ######################## START ##
 #
 function qbtupdater() {
     sleep 1
@@ -335,15 +349,15 @@ function qbtupdater() {
     echo -e "${DB_GREEN}  DONE   ${NC}"
     sleep 1
 }
-
 #
-# Functions Block END #
+## qBitTorrent Update function ########################## END ##
 
-# Reserved space for further update START #
-#
+################################################################
+## MAIN CODE ###################################################
+
 clear
 
-# ASCII Logo START #
+## ASCII logo ######################################### START ##
 #
 cat << "EOF"
 
@@ -358,15 +372,13 @@ cat << "EOF"
 
 EOF
 #
-# ASCII Logo END #
+## ASCII logo ########################################### END ##
 
 echo
 echo -ne " \n\n${MSG_IG}Executing some preflight checks...${NC} "
 sleep 1
-#
-# Reserved space for further update END #
 
-# Check for ROOT/SUDO privilege START #
+## Check for ROOT/SUDO privilege ###################### START ##
 #
 echo
 echo -ne "\n${MSG_IG}Checking for ${NC}${LBLUE}SUDO${GREEN}...                  "
@@ -391,9 +403,9 @@ fi
 echo -e "${DB_GREEN} PRESENT ${NC}"
 sleep 1
 #
-# Check for ROOT/SUDO privilege END #
+## Check for ROOT/SUDO privilege ######################## END ##
 
-# Check if internet is available START #
+## Check if internet is available ##################### START ##
 #
 echo -ne "\n${MSG_IG}Detecting internet connection...      ${NC}"
 if check_internet; then
@@ -408,9 +420,9 @@ else
     exit 1
 fi
 #
-# Check if internet is available END #
+## Check if internet is available ####################### END ##
 
-# Check if host system is DietPi START #
+## Check if host system is DietPi ##################### START ##
 #
 echo -ne "${MSG_IG}Detecting ${LYELLOW}DietPi${NC} ${GREEN}installation...      ${NC}"
 if [ -f /boot/dietpi/dietpi-services ]; then
@@ -423,11 +435,10 @@ else
     sleep 1
     exit 1
 fi
-
 #
-# Check if host system is DietPi END #
+## Check if host system is DietPi ####################### END ##
 
-# Check if qBitTorrent service has been already installed START #
+## Check if qBT service has been already installed #### START ##
 #
 echo -ne "\n${MSG_IG}Detecting qBitTorrent installation... ${NC}"
 
@@ -481,11 +492,10 @@ else
         exit 1
     fi
 fi
-
 #
-# Check if qBitTorrent service has been already installed END #
+## Check if qBT service has been already installed ###### END ##
 
-# Check if qbittorrent is up and running START #
+## Check if qBt service is up and running ############# START ##
 #
 echo -e "\n\n${MSG_IG}Preflight checks before update...     ${NC}\n"
 sleep 1
@@ -506,13 +516,11 @@ else
     echo -e "${MSG_IG}${LBLUE}qBitTorrent${NC} ${GREEN}service inactive...       ${NC}\n"
 fi
 sleep 1
-
 #
-# Check if qbittorrent is up and running END #
+## Check if qBt service is up and running ############### END ##
 
-# Final check if all required parameters have been met START #
+## Update preflight checks ############################ START ##
 #
-
 if [ "$sysdietpi" = true ] && [ "$inet_present" = true ] && [ "$qbtloaded" = true ] && [ "$qbtactive" = false ]; then
     echo -e "${MSG_IG}Great! All requirements have been met.\n          Proceeding with update...${NC}\n"
     sleep 1
@@ -530,6 +538,5 @@ else
 fi
 sleep 1
 exit 0
-
 #
-# Final check if all required parameters have been met END #
+## Update preflight checks ############################## END ##
