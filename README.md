@@ -6,8 +6,8 @@
 Linux BASH script which provides an option to automatically download and update qbittorrent-nox to the latest version available.
 Currently, it is mainly intended for installing and updating already installed qBitTorrent-nox on `DietPi` linux.
 
-This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable, main reason being Debian apt package versions are not always up to date.
-
+This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable binary from [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static) GitHub repository, main reason being Debian apt package versions are not always up to date.
+ 
 
 ### The way it works
  
@@ -26,9 +26,9 @@ If `DietPi` `qBitTorrent` installation is present, it would be checked if it is 
 
 Updating procedure would start only if all three requirements were met:
 
-1. System detected as `DietPi`
-2. `DietPi` `qBitTorrent` version found or installed.
-3. `qBitTorrent` service marked as inactive.
+  1. System detected as `DietPi`
+  2. `DietPi` `qBitTorrent` version found or installed.
+  3. `qBitTorrent` service marked as inactive.
 
 Script would then try to detect host system achitecture and offer user to accept detected architecture by typing `0` and pressing `Enter`, along with choice to manually chose system architecture by offering two most used architectures if he disagrees with one that was detected.
 
@@ -36,12 +36,23 @@ Script would then try to detect host system achitecture and offer user to accept
 
 Pressing `Enter` without entering any of options listed, or chosing option to `Abort` would abort the script.
 
+As of the `v1.2`, user is prompted to choose which libtorrent version is desired to be used (current options being `libtorrent 2.0` and `libtorrent 1.2`).
 
+For security purposes, old executable binary is backed up (renamed) with `.bak` extension.
+Keep in mind that each script rerun will rewrite the backup file. This is about to change in future releases.
+
+ 
 ### How to use
+Option 1 (convenient one-liner):
+  Copy/Paste it to the console and execute (Enter)
+  ```
+  bash <(curl -fsSL https://github.com/TeraflopsBH/qbt-update-sh/releases/latest/download/qbtupd.sh)
+  ```
 
-1. Download `qbtupd.sh`
-2. CHMOD it to enable execution: `chmod u+x qbtupd.sh`
-3. Execute it: `./qbtupd.sh`
+Option 2 (manual download):
+  1. Download `qbtupd.sh`
+  2. CHMOD it to enable execution: `chmod u+x qbtupd.sh`
+  3. Execute it: `./qbtupd.sh`
 
 
 ### Notice
