@@ -258,7 +258,7 @@ function libtorchoice() {
         echo -e "${GREEN}          (if not sure, choose libtorrent 2.0):${NC}\n"
         echo -e "   1. ${LMAGENTA}libtorrent 2.0${NC} ${GREEN}(default)${NC}"
         echo
-        echo -e "   2. ${LBLUE}libtorrent 2.0${NC}"
+        echo -e "   2. ${LBLUE}libtorrent 1.2${NC}"
         echo
         echo -ne "\n${GREEN}Enter choice ${LYELLOW}${BOLD}${ULINE}[1]${NC}${GREEN} or ${LYELLOW}${BOLD}${ULINE}[2]${NC}: "
         read -r choice
