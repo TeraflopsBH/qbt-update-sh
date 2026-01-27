@@ -46,7 +46,7 @@ Keep in mind that each script rerun will rewrite the backup file. This is about 
 Option 1 (convenient one-liner):
   Copy/Paste it to the console and execute (Enter)
   ```
-  curl -fsSL https://github.com/TeraflopsBH/qbt-update-sh/releases/latest/download/qbtupd.sh] | bash
+  curl -fsSL https://github.com/TeraflopsBH/qbt-update-sh/releases/latest/download/qbtupd.sh | bash
   ```
 
 Option 2 (manual download):
