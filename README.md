@@ -4,41 +4,39 @@
 
 ## Intro
 Linux BASH script which provides an option to automatically download and update qbittorrent-nox to the latest version available.
-Currently, it is mainly intended for installing and updating already installed qBitTorrent-nox on `DietPi` linux.
+Currently, it is mainly intended for installing and updating already installed qBitTorrent-nox on `DietPi` Linux.
 
-This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable binary from [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static) GitHub repository, main reason being Debian apt package versions are not always up to date.
+This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable binary from [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static) GitHub repository, the main reason being that Debian apt package versions are not always up to date.
  
 
 ### The way it works
  
 The `qbt-update-sh` project is a `bash` script which updates `qbittorrent-nox` installation on `DietPi` using a static `qbittorrent-nox` binary from [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static) GitHub repository.
 
-As it requires `ROOT / SUDO` privilege to work as intended, if run as `non-root` user, it would prompt user if he wants script ro rerun with as root and do so if user agrees to. Otherwise script would abort.
+As it requires `ROOT / SUDO` privilege to work as intended, if run as a `non-root` user, it would prompt the user if he wants script to rerun as root and do so if the user agrees. Otherwise, the script would abort.
 
-Script would then try to detect the if system platform is `DietPi` by checking for existence of specific files.
-If `DietPi` has been detected, script would proceed further. Otherwise, it would abort.
+The script would then try to detect if the system platform is `DietPi` by checking for the existence of specific files.
+If `DietPi` has been detected, the script will proceed further. Otherwise, it would abort.
 
-Script then checks if `DietPi` version of `qBitTorrent` has been already installed and offers to install if not, by executing the command: `dietpi-software install 46`.
-If `DietPi` `qBitTorrent` installation was not detected and user refuses to allow script to install it, script would abort.
+Script then checks if `DietPi` version of `qBitTorrent` has already been installed and offers to install it if not, by executing the command: `dietpi-software install 46`.
+If `DietPi` `qBitTorrent` installation was not detected and the user refuses to allow the script to install it, the script would abort.
 Otherwise, it would proceed with installing `qBitTorrent` as described above.
 
-If `DietPi` `qBitTorrent` installation is present, it would be checked if it is running and stopped if so.
+If `dietpi-software` installation of `qBitTorrent` is present, it would be checked if it is running and stopped if so.
 
-Updating procedure would start only if all three requirements were met:
+The updating procedure would start only if all three requirements were met:
 
-  1. System detected as `DietPi`
+  1. System detected as `DietPi`.
   2. `DietPi` `qBitTorrent` version found or installed.
   3. `qBitTorrent` service marked as inactive.
 
-Script would then try to detect host system achitecture and offer user to accept detected architecture by typing `0` and pressing `Enter`, along with choice to manually chose system architecture by offering two most used architectures if he disagrees with one that was detected.
+Script would then try to detect the host system architecture and offer the user to accept the detected architecture by typing `0` and pressing `Enter`, along with a choice to manually choose system architecture by offering the two most used architectures if the user disagrees with the one that is detected.
 
-`This part will be expanded further to broaden the menu options to cover all architectures qbittorrent-nox-static supports`
+Pressing `Enter` without entering any of the options listed, or choosing the option to `Abort` would abort the script.
 
-Pressing `Enter` without entering any of options listed, or chosing option to `Abort` would abort the script.
+As of v1.2, the user is prompted to choose which libtorrent version is desired to be used during installation (current options being `libtorrent 2.0` and `libtorrent 1.2`).
 
-As of the `v1.2`, user is prompted to choose which libtorrent version is desired to be used (current options being `libtorrent 2.0` and `libtorrent 1.2`).
-
-For security purposes, old executable binary is backed up (renamed) with `.bak` extension.
+For security purposes, the old executable binary is backed up (renamed) with a `.bak` extension.
 Keep in mind that each script rerun will rewrite the backup file. This is about to change in future releases.
 
  
@@ -50,7 +48,7 @@ Option 1 (convenient one-liner):
   ```
 
 Option 2 (manual download):
-  1. Download `qbtupd.sh`
+  1. Download the script file: `qbtupd.sh`
   2. CHMOD it to enable execution: `chmod u+x qbtupd.sh`
   3. Execute it: `./qbtupd.sh`
 
@@ -58,6 +56,6 @@ Option 2 (manual download):
 ### Notice
 
 This `bash` script is in a `work-in-progress` state.
-It was tested on `aarch64` and `x86_64` architectures using `DietPi` optimized `Debian Bullseye` distro and everything worked as intended.
+It was tested on `aarch64` and `x86_64` architectures using `DietPi` optimized `Debian Bullseye` distro, and everything worked as intended.
 
-I have a plan to improve end expand it further to autodetect if system running is non-dietpi (vanilla) linux installation and make it properly install `qbittorrent-nox` binaries, as per system architecture detected.
+I have a plan to improve and expand it further to autodetect if the system running is a non-dietpi (vanilla) Linux installation and make it properly install `qbittorrent-nox` binaries, as per the system architecture detected.
