@@ -38,11 +38,11 @@ If DietPi cannot verify the software state, restore and uninstall are disabled r
 4. Shows each candidate's qBittorrent version, filename and size, then asks the user to select one and confirm the restore.
 5. Stages the selected executable before stopping the service. If an executable is currently installed, it saves that version as a new timestamped safety backup and saves a private pre-restore copy of the current `qBittorrent.conf` for rollback.
 6. If the selected executable has a matching pre-update config snapshot from an updater-managed update, the script applies that version-matched configuration before starting the restored executable. This matters because a newer qBittorrent version may migrate settings that an older version cannot use correctly.
-7. If the restored binary changes its paired configuration on startup, the script offers to reapply the configuration snapshot that belongs to that executable and restart qBittorrent. If recovery fails, it attempts to restore the previous executable and the pre-restore configuration.
+7. If the restored binary changes the selected configuration snapshot on startup, the script offers to reapply that snapshot and restart qBittorrent. If recovery fails, it attempts to restore the previous executable and the pre-restore configuration.
 8. Older executable backups created before config snapshots were paired will be labelled as legacy backups. For those, the script offers any existing saved config snapshots for manual selection; these are not guaranteed to match the chosen executable, so choose carefully. If no suitable snapshot exists, unsaved pre-upgrade settings cannot be reconstructed.
 9. Retains the selected source executable backup, any new executable safety backup, and the configuration snapshots. Removing an older executable backup through the cleanup menu also removes its paired config snapshot; restore itself does not run that cleanup menu.
 
-Restoring an executable does not roll back downloaded files or the full torrent session state. Configuration recovery is best-effort; retain the displayed configuration snapshot path if WebUI credentials or ports need to be recovered manually.
+Restoring an executable and its configuration does not roll back downloaded files or the full torrent session state. Configuration recovery is best-effort; retain the displayed configuration snapshot path if WebUI credentials or ports need to be recovered manually.
 
 ### Uninstall workflow
 
