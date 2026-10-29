@@ -8,28 +8,44 @@ A Bash updater for `qbittorrent-nox` on DietPi. It downloads the static executab
 
 ## What the updater does
 
-The process is deliberately interactive. It has separate confirmation points for the updater itself, missing helper packages, optional DietPi qBittorrent installation, and the final binary replacement.
+On launch, the script verifies root privileges and checks for the DietPi marker. It then opens a main menu showing the installed qBittorrent version, service status, and the number of local backups:
 
-1. Requires root privileges and checks that the DietPi marker file exists. It exits on non-DietPi systems.
-2. Shows a startup safety notice and waits for explicit confirmation before proceeding to preflight checks.
-3. Checks the commands it needs. If any helper command is missing, it lists the missing commands and associated APT packages, explains what it will run, and asks permission before running `apt-get update` and installing packages. It uses `--no-install-recommends --no-upgrade` and verifies the commands afterward. APT (`apt-get`) and `systemctl` must already be available.
-4. Checks for `/usr/bin/qbittorrent-nox` and the `qbittorrent.service` unit independently. If both are absent, it explains the DietPi software installation and asks permission before running software ID 46. If only one exists, it aborts and asks you to repair the inconsistent installation.
-5. Verifies that the service's `ExecStart` references `/usr/bin/qbittorrent-nox`, checks HTTPS access to GitHub, and fetches and validates the release metadata.
-6. Displays the installed and latest qBittorrent versions. It then asks you to choose the architecture (retaining the detected option and the original `aarch64` / `x86_64` alternatives) and libtorrent 2.0 or 1.2.
-7. Shows a final confirmation screen summarizing the current/latest versions, architecture, libtorrent choice, target executable, backup, service restart, and rollback behavior. It asks permission before downloading or changing the installed executable. Declining means the updater will not stop the service or replace the executable. If qBittorrent was absent, any DietPi installation happens only after a separate earlier approval.
-8. Downloads the selected asset with HTTP error checking and retries. It verifies that the download is non-empty, is an ELF executable for the selected architecture, has executable permissions for the self-test, and reports the expected qBittorrent version.
-9. Stages the candidate on the target filesystem and creates a timestamped backup of the current executable. Only then does it stop the service and atomically replace the executable.
-10. Starts the service and checks that it becomes active. If replacement or startup fails, it attempts to restore the previous executable and the service's prior active/inactive state. If automatic recovery fails, the backup is left in place and its path is reported.
-11. Only after a successful update, offers choices for keeping all older backups, keeping only the newest previous backup, or deleting older backups. The backup from the current update is always retained.
+- **Update qBittorrent** — follows the interactive update workflow described below.
+- **Restore a previous backup** — appears when backup files using this updater's naming pattern are found. Restoration is local and does not perform a GitHub release check.
+- **Exit** — leaves the system unchanged.
 
-The updater does not publish releases or change release assets. Its binary-update workflow does not intentionally modify existing qBittorrent settings. If qBittorrent was absent, the separately approved DietPi installation may create its initial configuration.
+### Update workflow
+
+1. Shows the update safety notice and waits for explicit confirmation.
+2. Checks the helper commands required for updating. If commands are missing, it lists the commands and APT packages, explains the operations, and asks permission before running `apt-get update` and installing packages with `--no-install-recommends --no-upgrade`. APT and `systemctl` must already be available.
+3. Checks for `/usr/bin/qbittorrent-nox` and `qbittorrent.service` independently. If both are absent, it asks permission before installing qBittorrent through DietPi (software ID 46). If only one exists, it aborts and asks you to repair the inconsistent installation.
+4. Verifies that the service's `ExecStart` references the target executable, checks HTTPS access to GitHub, and fetches and validates the release metadata.
+5. Displays installed and latest qBittorrent versions, then asks you to select the architecture and libtorrent 2.0 or 1.2.
+6. Shows a final confirmation screen. It waits for approval before downloading or changing the executable.
+7. Downloads the selected asset and validates that it is non-empty, an ELF executable for the selected architecture, runnable for its `--version` self-test, and reports the expected qBittorrent version.
+8. Stages the candidate in `/usr/bin`, creates a timestamped backup of the current executable, then stops the service and atomically replaces the executable.
+9. Starts the service and checks that it becomes active. If replacement or startup fails, it attempts to restore the previous executable and service state.
+10. After a successful update, offers cleanup choices for older backups. The backup created for the current update is always retained.
+
+### Restore workflow
+
+1. Scans the timestamped backup filename pattern `/usr/bin/qbittorrent-nox.*.bak` and presents compatible backups newest first.
+2. Skips files that are not regular, non-empty ELF executables, do not match the detected host architecture, or fail their `--version` self-test.
+3. Shows each candidate's qBittorrent version, filename and size, then asks the user to select one and confirm the restore.
+4. Stages the selected executable before stopping the service. If an executable is currently installed, it first saves that version as a new timestamped safety backup. If the target is missing, failed restoration attempts return it to the missing state.
+5. Replaces the executable and preserves the service's prior active/inactive state. If a previously active service fails to start, the script attempts to restore the pre-restore executable and restart the service.
+6. Retains both the selected source backup and any newly created safety backup; restore does not run the older-backup cleanup menu.
+
+Restoration covers the executable only. It does not roll back qBittorrent configuration, torrent state, or other application data. Automatic rollback is best-effort, so keep separate backups of important system configuration.
+
+The updater does not publish releases or change release assets. The update workflow does not intentionally modify existing qBittorrent settings. If qBittorrent was absent, the separately approved DietPi installation may create its initial configuration.
 
 ## Requirements
 
 - DietPi Linux, APT (`apt-get`), and the expected `qbittorrent.service` systemd unit. The `systemctl` command must already be available.
 - Root privileges. When run as a non-root user, the script explains the requirement and exits; it does not automatically re-run itself through `sudo`.
 - The updater checks for every external helper command it uses. If commands are missing, it lists the required packages and asks for consent before running `apt-get update` and installing only those packages, with `--no-install-recommends --no-upgrade`. It verifies the commands again after installation. No package installation happens without an explicit yes.
-- HTTPS access to GitHub and an interactive terminal (the script reads confirmations and menu choices from `/dev/tty`).
+- An interactive terminal (the script reads confirmations and menu choices from `/dev/tty`). The update workflow requires HTTPS access to GitHub; restoring a local backup does not require GitHub access. If helper packages are missing, installing them through APT may require network access.
 
 ## Usage
 
@@ -55,8 +71,10 @@ sudo bash qbtupd.sh
 
 ## Recovery notes
 
-- The existing executable is backed up to a timestamped file matching `/usr/bin/qbittorrent-nox.*.bak`.
-- The current update's backup is never removed by the backup-cleanup menu. The options only manage older backups.
+- The main menu offers local restore when backup files matching `/usr/bin/qbittorrent-nox.*.bak` exist. Only compatible backups that pass the executable checks are selectable.
+- Restoring an older executable creates a new safety backup of the currently installed executable; if the executable is missing, a failed restore attempts to return the target to that absent state.
+- Restore retains the chosen source backup and any safety backup. It does not run the backup-cleanup menu.
+- After a successful update, the current update's backup is never removed by the cleanup menu. The options only manage older backups.
 - If the service does not start after an update, inspect logs with `journalctl -u qbittorrent.service`.
 - Automatic rollback is best-effort. If the service was active before the update, the script attempts to restart it after rollback; if it was inactive, the script leaves it stopped.
 - Keep a separate backup of important system configuration; executable rollback does not reverse unrelated system or configuration changes.
