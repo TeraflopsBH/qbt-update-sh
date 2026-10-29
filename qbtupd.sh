@@ -152,13 +152,15 @@ check_internet() {
 }
 
 ensure_dependencies() {
-    # Check all external helper commands before using curl, jq, or file.
+    # Restore mode omits the network/update-only curl and jq helpers.
     # APT and systemctl are prerequisites for bootstrapping/system management.
+    local mode="${1:-update}"
     local required_command package
     local -a required_commands=(
-        curl jq file grep head sort du cut basename sleep mktemp
+        file grep head sort du cut basename sleep mktemp
         cp chmod mv rm date uname
     )
+    if [[ "$mode" == "update" ]]; then required_commands+=(curl jq); fi
     local -a missing_commands=()
     local -a missing_packages=()
 
@@ -484,6 +486,262 @@ manage_backups() {
 }
 
 ################################################################
+# MAIN MENU AND LOCAL BACKUP RESTORE
+################################################################
+
+count_backup_files() {
+    local -a files=()
+    shopt -s nullglob
+    files=("${BIN_PATH}".*.bak)
+    shopt -u nullglob
+    printf '%s' "${#files[@]}"
+}
+
+get_main_menu_choice() {
+    local backup_count current_version="UNKNOWN" current_output="" service_status="Unknown"
+    local choice exit_choice
+    backup_count="$(count_backup_files)"
+
+    if [[ -x "$BIN_PATH" ]] && current_output="$("$BIN_PATH" --version 2>&1)"; then
+        if [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then current_version="${BASH_REMATCH[1]}"; fi
+    elif [[ ! -e "$BIN_PATH" ]]; then
+        current_version="Not installed"
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl is-active --quiet "$QBT_SERVICE"; then service_status="Active"
+        elif systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then service_status="Inactive"
+        else service_status="Unit not found"; fi
+    fi
+
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_MAGENTA}                       QBITTORRENT UPDATER MENU                        ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  Installed version : ${LYELLOW}$current_version${NC}"
+    echo_err "  Service status    : ${LCYAN}$service_status${NC}"
+    echo_err "  Local backups     : ${LCYAN}$backup_count${NC}"
+    echo_err
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+    echo_err "  1. ${LGREEN}Update qBittorrent${NC}"
+    if (( backup_count > 0 )); then
+        echo_err "  2. ${LYELLOW}Restore a previous backup${NC}"
+        exit_choice=3
+    else
+        echo_err "  No updater backups detected; restore is unavailable."
+        exit_choice=2
+    fi
+    echo_err "  $exit_choice. ${LRED}Exit${NC}"
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+    while true; do
+        echo_n_err "\n  ${LYELLOW}Select an action [1-$exit_choice]: ${NC}"
+        read -r choice < /dev/tty || choice="$exit_choice"
+        choice="${choice:-$exit_choice}"
+        case "$choice" in
+            1) echo "update"; return 0 ;;
+            2) if (( backup_count > 0 )); then echo "restore"; else echo "exit"; fi; return 0 ;;
+            3) if (( backup_count > 0 )); then echo "exit"; fi ;;
+            *) echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}" ;;
+        esac
+    done
+}
+
+print_restore_warning() {
+    local selected_path="$1" selected_version="$2" current_version="$3"
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_YELLOW}                       BACKUP RESTORE CONFIRMATION                     ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  Installed version : ${LYELLOW}$current_version${NC}"
+    echo_err "  Restore version   : ${LGREEN}$selected_version${NC}"
+    echo_err "  Selected backup   : ${LCYAN}$selected_path${NC}"
+    echo_err "  Target executable : ${LBLUE}$BIN_PATH${NC}"
+    echo_err
+    echo_err "  If approved, the updater will validate and stage the backup, preserve"
+    echo_err "  the current executable as a new safety backup, stop the service if it"
+    echo_err "  is running, replace the executable and restore the prior service state."
+    echo_err
+    echo_err "  This restores the executable only, not settings, torrent state or other"
+    echo_err "  application data. The selected backup and safety backup are retained."
+    echo_err "  If restoration or service startup fails, rollback is best-effort."
+    echo_err
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+}
+
+restore_backup() {
+    local raw_arch detected_arch backup description output version size
+    local current_version="UNKNOWN" current_output="" service_execstart
+    local selected_index="" selected_path="" selected_version="" timestamp retries
+    local -a backup_files=() sorted_backups=() restore_candidates=() restore_versions=()
+
+    if [[ ! -f "$BIN_PATH" || -L "$BIN_PATH" ]]; then
+        echo_err "${MSG_WR}Restore requires the current target to be a regular file so it can be preserved for rollback. Repair the installation if $BIN_PATH is missing or is a symlink.${NC}"
+        exit 1
+    fi
+    if ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
+        echo_err "${MSG_WR}$QBT_SERVICE is unavailable. Repair the DietPi qBittorrent service before restoring.${NC}"
+        exit 1
+    fi
+    service_execstart="$(systemctl show -p ExecStart --value "$QBT_SERVICE" 2>/dev/null || true)"
+    if [[ "$service_execstart" != *"$BIN_PATH"* ]]; then
+        echo_err "${MSG_WR}$QBT_SERVICE does not appear to execute $BIN_PATH. Refusing to restore a binary the service may not use.${NC}"
+        echo_err "  ExecStart: ${service_execstart:-unavailable}"
+        exit 1
+    fi
+
+    raw_arch="$(uname -m)"
+    case "$raw_arch" in
+        armv7l|armv7) detected_arch="armv7" ;;
+        arm64|aarch64) detected_arch="aarch64" ;;
+        x86_64|amd64) detected_arch="x86_64" ;;
+        armhf) detected_arch="armhf" ;;
+        *) detected_arch="$raw_arch" ;;
+    esac
+
+    shopt -s nullglob
+    backup_files=("${BIN_PATH}".*.bak)
+    shopt -u nullglob
+    if (( ${#backup_files[@]} > 0 )); then
+        while IFS= read -r backup; do sorted_backups+=("$backup"); done < <(printf '%s\n' "${backup_files[@]}" | sort -r)
+    fi
+
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_MAGENTA}                       AVAILABLE LOCAL BACKUPS                         ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  Backups are checked for regular-file status, ELF format, architecture"
+    echo_err "  compatibility and a successful qBittorrent --version self-test."
+    echo_err
+
+    for backup in "${sorted_backups[@]}"; do
+        if [[ ! -f "$backup" || -L "$backup" || ! -s "$backup" ]]; then
+            echo_err "${MSG_WY}Skipping invalid backup file: $backup${NC}"
+            continue
+        fi
+        description="$(file -b -- "$backup" 2>/dev/null || true)"
+        if [[ "$description" != *ELF* ]]; then
+            echo_err "${MSG_WY}Skipping non-ELF backup: $(basename "$backup")${NC}"
+            continue
+        fi
+        case "$detected_arch:$description" in
+            aarch64:*aarch64*|x86_64:*x86-64*|armv7:*ARM*|armhf:*ARM*) ;;
+            *) echo_err "${MSG_WY}Skipping architecture-mismatched backup: $(basename "$backup") ($description)${NC}"; continue ;;
+        esac
+        if ! output="$("$backup" --version 2>&1)"; then
+            echo_err "${MSG_WY}Skipping backup that failed its --version self-test: $(basename "$backup")${NC}"
+            continue
+        fi
+        version="$(printf '%s\n' "$output" | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 || true)"
+        if [[ -z "$version" ]]; then
+            echo_err "${MSG_WY}Skipping backup with an unrecognised version: $(basename "$backup")${NC}"
+            continue
+        fi
+        restore_candidates+=("$backup")
+        restore_versions+=("$version")
+    done
+
+    if (( ${#restore_candidates[@]} == 0 )); then
+        echo_err
+        echo_err "${MSG_WR}No valid, compatible backups were found. No changes have been made.${NC}"
+        exit 1
+    fi
+    for ((i=0; i<${#restore_candidates[@]}; i++)); do
+        backup="${restore_candidates[$i]}"
+        size="$(du -h -- "$backup" 2>/dev/null | cut -f1 || true)"
+        echo_err "  $((i + 1)). qBittorrent ${LYELLOW}${restore_versions[$i]}${NC}"
+        echo_err "     ${LGRAY}$(basename "$backup")  (${size:-size unknown})${NC}"
+    done
+    echo_err
+    echo_err "  0. ${LRED}Cancel and return to the shell${NC}"
+    while true; do
+        echo_n_err "\n  ${LYELLOW}Select a backup [0-${#restore_candidates[@]}]: ${NC}"
+        read -r selected_index < /dev/tty || selected_index="0"
+        selected_index="${selected_index:-0}"
+        if [[ "$selected_index" == "0" ]]; then
+            echo_err "\n${MSG_WY}Restore cancelled. No files or service state were changed.${NC}"
+            return 0
+        fi
+        if [[ "$selected_index" =~ ^[0-9]+$ ]] && (( selected_index >= 1 && selected_index <= ${#restore_candidates[@]} )); then break; fi
+        echo_err "${MSG_WY}Invalid selection. Choose a listed number or 0 to cancel.${NC}"
+    done
+
+    selected_path="${restore_candidates[$((selected_index - 1))]}"
+    selected_version="${restore_versions[$((selected_index - 1))]}"
+    if current_output="$("$BIN_PATH" --version 2>&1)" && [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
+        current_version="${BASH_REMATCH[1]}"
+    fi
+    print_restore_warning "$selected_path" "$selected_version" "$current_version"
+    if ! confirm_action "Restore qBittorrent $selected_version from this backup?"; then
+        echo_err "\n${MSG_WY}Restore cancelled. The installed executable and service were not changed.${NC}"
+        return 0
+    fi
+
+    # Stage and validate the selected backup before stopping the service.
+    STAGED_PATH="/usr/bin/.qbittorrent-nox.restore.$BASHPID"
+    if ! cp -- "$selected_path" "$STAGED_PATH" || ! chmod 755 "$STAGED_PATH"; then
+        rm -f -- "$STAGED_PATH"
+        STAGED_PATH=""
+        echo_err "${MSG_WR}Could not stage the selected backup. The installed executable was not changed.${NC}"
+        exit 1
+    fi
+    timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"
+    BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
+    if ! cp -p -- "$BIN_PATH" "$BACKUP_FILE"; then
+        rm -f -- "$STAGED_PATH"
+        STAGED_PATH=""
+        BACKUP_FILE=""
+        echo_err "${MSG_WR}Could not create a safety backup of the installed executable. Restore aborted.${NC}"
+        exit 1
+    fi
+    echo_err "\n${MSG_IG}Created safety backup of the installed executable: ${LYELLOW}$BACKUP_FILE${NC}"
+
+    if systemctl is-active --quiet "$QBT_SERVICE"; then SERVICE_WAS_ACTIVE=1; else SERVICE_WAS_ACTIVE=0; fi
+    UPDATE_IN_PROGRESS=1
+    stop_service
+
+    echo_err "\n${MSG_IG}Restoring qBittorrent ${LYELLOW}$selected_version${NC}..."
+    if ! mv -f -- "$STAGED_PATH" "$BIN_PATH"; then
+        echo_err "${MSG_WR}Replacement failed. Automatic rollback will be attempted.${NC}"
+        exit 1
+    fi
+    STAGED_PATH=""
+
+    if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
+        echo_n_err "${MSG_IG}Starting and verifying $QBT_SERVICE after restore... ${NC}"
+        systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
+        if ! systemctl start "$QBT_SERVICE"; then
+            echo_err "${DB_RED} FAILED ${NC}"
+            echo_err "${MSG_WR}Service start failed; automatic rollback will be attempted.${NC}"
+            exit 1
+        fi
+        retries=10
+        while (( retries > 0 )); do systemctl is-active --quiet "$QBT_SERVICE" && break; sleep 1; retries=$((retries - 1)); done
+        if ! systemctl is-active --quiet "$QBT_SERVICE"; then
+            echo_err "${DB_RED} FAILED ${NC}"
+            echo_err "${MSG_WR}Service did not become active; automatic rollback will be attempted. Inspect journalctl -u $QBT_SERVICE.${NC}"
+            exit 1
+        fi
+    else
+        # Respect the original inactive state; restoration does not start services unexpectedly.
+        systemctl stop "$QBT_SERVICE" >/dev/null 2>&1 || true
+    fi
+
+    UPDATE_IN_PROGRESS=0
+    echo_err "${DB_GREEN}  DONE  ${NC}"
+    echo_err
+    echo_err "${MSG_IG}Restore successful: qBittorrent $selected_version is installed.${NC}"
+    if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
+        echo_err "${MSG_IG}$QBT_SERVICE is active.${NC}"
+    else
+        echo_err "${MSG_IG}$QBT_SERVICE was inactive before restore and remains stopped.${NC}"
+    fi
+    echo_err "${MSG_IG}Pre-restore safety backup retained at: ${LYELLOW}$BACKUP_FILE${NC}"
+    echo_err "${MSG_IG}The selected source backup was retained: ${LYELLOW}$selected_path${NC}"
+}
+
+################################################################
 # CORE LOGIC
 ################################################################
 
@@ -627,15 +885,33 @@ main() {
         exit 1
     fi
 
-    print_startup_warning
-    if ! confirm_action "Continue to the preflight checks?"; then
-        echo_err "\n${MSG_WY}Cancelled. No changes have been made.${NC}\n"
-        exit 0
-    fi
-
-    # Ask before installing any helper packages.
-    ensure_dependencies
-    check_internet
+    local action
+    action="$(get_main_menu_choice)"
+    case "$action" in
+        exit)
+            echo_err "\n${MSG_IG}Exited without making changes.${NC}"
+            exit 0
+            ;;
+        restore)
+            # Restore is a local operation; no GitHub release check is needed.
+            ensure_dependencies restore
+            restore_backup
+            return 0
+            ;;
+        update)
+            print_startup_warning
+            if ! confirm_action "Continue with the update workflow?"; then
+                echo_err "\n${MSG_WY}Cancelled. No changes have been made.${NC}\n"
+                exit 0
+            fi
+            ensure_dependencies update
+            check_internet
+            ;;
+        *)
+            echo_err "${MSG_WR}Unknown main-menu action. Aborting safely.${NC}"
+            exit 1
+            ;;
+    esac
 
     # Check the executable and service unit independently.
     echo_n_err "\n        ${GREEN}- Detecting qBitTorrent installation...                    ${NC}"
