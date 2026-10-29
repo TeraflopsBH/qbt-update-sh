@@ -8,20 +8,21 @@ A Bash updater for `qbittorrent-nox` on DietPi. It downloads the static executab
 
 ## What the updater does
 
-On launch, the script verifies root privileges and checks for the DietPi marker. It then reads DietPi's machine-readable software list to determine whether qBittorrent software ID 46 is installed. The main menu shows the installed qBittorrent version, service status, DietPi software state, and number of local executable backups:
+On launch, the script verifies root privileges and checks for the DietPi marker. It reads DietPi's machine-readable software list and checks the qBittorrent executable and systemd service before offering any update:
 
-- **Update qBittorrent** — follows the interactive update workflow described below.
-- **Restore a previous backup** — offered only when DietPi confirms software ID 46 is installed and updater backup files exist.
-- **Uninstall qBittorrent through DietPi** — offered only when DietPi confirms software ID 46 is installed.
-- **Exit** — leaves the system unchanged.
+- If both the executable and service are missing, the menu offers **Install qBittorrent through DietPi** and **Exit** only. It does not offer Update yet.
+- If only one component is present, the menu offers a DietPi repair/reinstall action and Exit. Updating stays disabled until both components are detected.
+- After installation/repair succeeds, the script returns to the main menu. The user must explicitly choose Update as a separate operation.
+- When both components exist, the menu offers **Update qBittorrent**, **Restore a previous backup** when DietPi confirms ID 46 is installed and backups exist, **Uninstall qBittorrent through DietPi** when ID 46 is installed, and **Exit**.
+- If DietPi marks ID 46 installed but both executable and service are missing, the repair action uses `dietpi-software reinstall 46`; otherwise it uses `dietpi-software install 46`.
 
-If DietPi cannot verify the software state, restore and uninstall are disabled rather than guessing from leftover files.
+The menu shows the installed qBittorrent version, service status, DietPi software state, and number of local executable backups. If DietPi cannot verify the software state, restore and uninstall are disabled rather than guessing from leftover files.
 
 ### Update workflow
 
 1. Shows the update safety notice and waits for explicit confirmation.
 2. Checks the helper commands required for updating. If commands are missing, it lists the commands and APT packages, explains the operations, and asks permission before running `apt-get update` and installing packages with `--no-install-recommends --no-upgrade`. APT and `systemctl` must already be available.
-3. Checks for `/usr/bin/qbittorrent-nox` and `qbittorrent.service` independently. If both are absent, it asks permission before installing qBittorrent through DietPi (software ID 46). If only one exists, it aborts and asks you to repair the inconsistent installation.
+3. The main menu offers Update only when both `/usr/bin/qbittorrent-nox` and `qbittorrent.service` exist. If both are missing, it asks permission to install qBittorrent via DietPi first; if only one exists, it offers a DietPi repair/reinstall action. After the install/repair succeeds, it returns to the menu and waits for a separate Update selection.
 4. Verifies that the service's `ExecStart` references the target executable, checks HTTPS access to GitHub, and fetches and validates the release metadata.
 5. Displays installed and latest qBittorrent versions, then asks you to select the architecture and libtorrent 2.0 or 1.2.
 6. Shows a final confirmation screen. It waits for approval before downloading or changing the executable.
@@ -99,7 +100,7 @@ sudo bash qbtupd.sh
 
 ## Testing status
 
-The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, and the software-state/config-snapshot unit tests, then tested in a disposable DietPi environment before using them on a live installation. In particular, test HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
+The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, and the software-state/config-snapshot/menu-routing unit tests, then tested in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
 ## Upstream project
 
