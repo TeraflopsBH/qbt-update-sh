@@ -524,7 +524,7 @@ dietpi_qbt_software_state() {
         return 0
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
-        IFS='|' read -r software_id software_state remainder <<< "$line"
+        IFS='|' read -r software_id software_state _ <<< "$line"
         software_id="${software_id//[[:space:]]/}"
         software_state="${software_state//[[:space:]]/}"
         if [[ "$software_id" == "46" && "$software_state" =~ ^[0-9]+$ ]]; then
