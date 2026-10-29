@@ -62,41 +62,54 @@ BACKUP_FILE=""
 STAGED_PATH=""
 UPDATE_IN_PROGRESS=0
 SERVICE_WAS_ACTIVE=0
+TARGET_MISSING_BEFORE=0
 
 cleanup() {
     local status=$?
-    if [[ $status -ne 0 && "${UPDATE_IN_PROGRESS:-0}" -eq 1 && -n "${BACKUP_FILE:-}" && -f "$BACKUP_FILE" ]]; then
-        echo_err "\n${MSG_WR}Update failed; attempting to restore the previous executable... ${NC}"
-        local restore_path="/usr/bin/.qbittorrent-nox.rollback.${BASHPID}"
+    local restore_path="/usr/bin/.qbittorrent-nox.rollback.${BASHPID}"
+    local rollback_ok=0
 
-        # Stop any partially-started candidate before restoring the old file.
+    if [[ $status -ne 0 && "${UPDATE_IN_PROGRESS:-0}" -eq 1 ]] &&
+       { [[ -n "${BACKUP_FILE:-}" && -f "$BACKUP_FILE" ]] || [[ "${TARGET_MISSING_BEFORE:-0}" -eq 1 ]]; }; then
+        echo_err "\n${MSG_WR}Operation failed; attempting to restore the previous executable state... ${NC}"
         systemctl stop "$QBT_SERVICE" >/dev/null 2>&1 || true
-        if cp -p "$BACKUP_FILE" "$restore_path" && chmod 755 "$restore_path" && mv -f "$restore_path" "$BIN_PATH"; then
+
+        if [[ -n "${BACKUP_FILE:-}" && -f "$BACKUP_FILE" ]]; then
+            if cp -p "$BACKUP_FILE" "$restore_path" && chmod 755 "$restore_path" && mv -f "$restore_path" "$BIN_PATH"; then
+                rollback_ok=1
+            fi
+        elif [[ "${TARGET_MISSING_BEFORE:-0}" -eq 1 ]]; then
+            if rm -f -- "$BIN_PATH"; then rollback_ok=1; fi
+        fi
+
+        if [[ "$rollback_ok" -eq 1 ]]; then
             if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
                 systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
                 if systemctl start "$QBT_SERVICE"; then
                     local retries=10
                     while (( retries > 0 )); do
-                        if systemctl is-active --quiet "$QBT_SERVICE"; then
-                            break
-                        fi
+                        if systemctl is-active --quiet "$QBT_SERVICE"; then break; fi
                         sleep 1
                         retries=$((retries - 1))
                     done
                     if systemctl is-active --quiet "$QBT_SERVICE"; then
-                        echo_err "${MSG_IG}Previous executable restored and service is active again.${NC}"
+                        echo_err "${MSG_IG}Previous executable state restored and service is active again.${NC}"
                     else
-                        echo_err "${MSG_WR}Previous executable restored, but service did not become active. Check journalctl -u $QBT_SERVICE.${NC}"
+                        echo_err "${MSG_WR}Executable state restored, but service did not become active. Check journalctl -u $QBT_SERVICE.${NC}"
                     fi
                 else
-                    echo_err "${MSG_WR}Previous executable restored, but service restart failed. Check journalctl -u $QBT_SERVICE.${NC}"
+                    echo_err "${MSG_WR}Executable state restored, but service restart failed. Check journalctl -u $QBT_SERVICE.${NC}"
                 fi
             else
-                echo_err "${MSG_IG}Previous executable restored. The service was inactive before the update and has been left stopped.${NC}"
+                echo_err "${MSG_IG}Previous executable state restored. The service was inactive before the operation and has been left stopped.${NC}"
             fi
         else
-            rm -f "$restore_path"
-            echo_err "${MSG_WR}AUTOMATIC ROLLBACK FAILED. Backup remains at: $BACKUP_FILE${NC}"
+            rm -f -- "$restore_path"
+            if [[ -n "${BACKUP_FILE:-}" ]]; then
+                echo_err "${MSG_WR}AUTOMATIC ROLLBACK FAILED. Safety backup remains at: $BACKUP_FILE${NC}"
+            else
+                echo_err "${MSG_WR}AUTOMATIC ROLLBACK FAILED. The target was originally absent; inspect $BIN_PATH and the service manually.${NC}"
+            fi
         fi
     fi
     if [[ -n "${STAGED_PATH:-}" && -e "$STAGED_PATH" ]]; then rm -f -- "$STAGED_PATH"; fi
@@ -547,7 +560,7 @@ get_main_menu_choice() {
 }
 
 print_restore_warning() {
-    local selected_path="$1" selected_version="$2" current_version="$3"
+    local selected_path="$1" selected_version="$2" current_version="$3" target_existed="$4"
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err "${DB_YELLOW}                       BACKUP RESTORE CONFIRMATION                     ${NC}"
@@ -558,9 +571,16 @@ print_restore_warning() {
     echo_err "  Selected backup   : ${LCYAN}$selected_path${NC}"
     echo_err "  Target executable : ${LBLUE}$BIN_PATH${NC}"
     echo_err
-    echo_err "  If approved, the updater will validate and stage the backup, preserve"
-    echo_err "  the current executable as a new safety backup, stop the service if it"
-    echo_err "  is running, replace the executable and restore the prior service state."
+    if [[ "$target_existed" -eq 1 ]]; then
+        echo_err "  If approved, the updater validates and stages this backup, saves the"
+        echo_err "  current executable as a new safety backup, then replaces the binary."
+    else
+        echo_err "  The installed executable is currently absent. If approved, the updater"
+        echo_err "  stages this backup and restores the missing binary. On failure, rollback"
+        echo_err "  will return the target to its original absent state."
+    fi
+    echo_err "  The service will be stopped only for replacement and its prior state"
+    echo_err "  will be restored after a successful operation."
     echo_err
     echo_err "  This restores the executable only, not settings, torrent state or other"
     echo_err "  application data. The selected backup and safety backup are retained."
@@ -575,8 +595,8 @@ restore_backup() {
     local selected_index="" selected_path="" selected_version="" timestamp retries
     local -a backup_files=() sorted_backups=() restore_candidates=() restore_versions=()
 
-    if [[ ! -f "$BIN_PATH" || -L "$BIN_PATH" ]]; then
-        echo_err "${MSG_WR}Restore requires the current target to be a regular file so it can be preserved for rollback. Repair the installation if $BIN_PATH is missing or is a symlink.${NC}"
+    if [[ -L "$BIN_PATH" || ( -e "$BIN_PATH" && ! -f "$BIN_PATH" ) ]]; then
+        echo_err "${MSG_WR}Target path is a symlink or non-regular file. Refusing to replace it: $BIN_PATH${NC}"
         exit 1
     fi
     if ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
@@ -669,10 +689,14 @@ restore_backup() {
 
     selected_path="${restore_candidates[$((selected_index - 1))]}"
     selected_version="${restore_versions[$((selected_index - 1))]}"
-    if current_output="$("$BIN_PATH" --version 2>&1)" && [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
+    if [[ -x "$BIN_PATH" ]] && current_output="$("$BIN_PATH" --version 2>&1)" && [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
         current_version="${BASH_REMATCH[1]}"
+    elif [[ ! -e "$BIN_PATH" ]]; then
+        current_version="Not installed"
     fi
-    print_restore_warning "$selected_path" "$selected_version" "$current_version"
+    local target_existed=0
+    [[ -f "$BIN_PATH" ]] && target_existed=1
+    print_restore_warning "$selected_path" "$selected_version" "$current_version" "$target_existed"
     if ! confirm_action "Restore qBittorrent $selected_version from this backup?"; then
         echo_err "\n${MSG_WY}Restore cancelled. The installed executable and service were not changed.${NC}"
         return 0
@@ -686,16 +710,22 @@ restore_backup() {
         echo_err "${MSG_WR}Could not stage the selected backup. The installed executable was not changed.${NC}"
         exit 1
     fi
-    timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"
-    BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
-    if ! cp -p -- "$BIN_PATH" "$BACKUP_FILE"; then
-        rm -f -- "$STAGED_PATH"
-        STAGED_PATH=""
+    if [[ "$target_existed" -eq 1 ]]; then
+        timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"
+        BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
+        if ! cp -p -- "$BIN_PATH" "$BACKUP_FILE"; then
+            rm -f -- "$STAGED_PATH"
+            STAGED_PATH=""
+            BACKUP_FILE=""
+            echo_err "${MSG_WR}Could not create a safety backup of the installed executable. Restore aborted.${NC}"
+            exit 1
+        fi
+        echo_err "\n${MSG_IG}Created safety backup of the installed executable: ${LYELLOW}$BACKUP_FILE${NC}"
+    else
         BACKUP_FILE=""
-        echo_err "${MSG_WR}Could not create a safety backup of the installed executable. Restore aborted.${NC}"
-        exit 1
+        TARGET_MISSING_BEFORE=1
+        echo_err "\n${MSG_WY}The executable was absent before restore; failure recovery will return the target to that absent state.${NC}"
     fi
-    echo_err "\n${MSG_IG}Created safety backup of the installed executable: ${LYELLOW}$BACKUP_FILE${NC}"
 
     if systemctl is-active --quiet "$QBT_SERVICE"; then SERVICE_WAS_ACTIVE=1; else SERVICE_WAS_ACTIVE=0; fi
     UPDATE_IN_PROGRESS=1
