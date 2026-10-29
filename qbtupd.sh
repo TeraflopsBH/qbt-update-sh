@@ -267,7 +267,7 @@ fetch_release_data() {
 }
 
 perform_update() {
-    local url="$1" expected_version="$2"
+    local url="$1" expected_version="$2" expected_arch="$3"
     local download_path candidate_version file_description timestamp staged_path retries
     echo_n_err "${MSG_IG}Making temporary download directory....................     ${NC}"
     TMP_DIR="$(mktemp -d)"; download_path="$TMP_DIR/qbittorrent-nox"
@@ -279,6 +279,10 @@ perform_update() {
     if [[ ! -s "$download_path" ]]; then echo_err "${MSG_WR}Downloaded file is empty. Existing executable was not changed.${NC}"; exit 1; fi
     file_description="$(file -b "$download_path" 2>/dev/null || true)"
     if [[ "$file_description" != *ELF* ]]; then echo_err "${MSG_WR}Downloaded file is not a recognized ELF executable ($file_description). Existing executable was not changed.${NC}"; exit 1; fi
+    case "$expected_arch:$file_description" in
+        aarch64:*aarch64*|x86_64:*x86-64*|armv7:*ARM*|armhf:*ARM*) ;;
+        *) echo_err "${MSG_WR}Downloaded ELF architecture does not match requested '$expected_arch' artifact: $file_description. Existing executable was not changed.${NC}"; exit 1 ;;
+    esac
     if ! candidate_version="$("$download_path" --version 2>&1)"; then echo_err "${MSG_WR}Downloaded executable failed its --version self-test. Existing executable was not changed.${NC}"; exit 1; fi
     if ! printf '%s\n' "$candidate_version" | grep -Fq "$expected_version"; then
         echo_err "${MSG_WR}Downloaded executable version does not match metadata version $expected_version. Existing executable was not changed.${NC}"
@@ -291,8 +295,8 @@ perform_update() {
     timestamp="$(date +'%Y%m%d_%H%M%S')"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
     if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then rm -f "$staged_path"; echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"; exit 1; fi
     echo_err "${MSG_IG}Created rollback backup: ${LYELLOW}$BACKUP_FILE${NC}"
-    stop_service
     UPDATE_IN_PROGRESS=1
+    stop_service
     echo_err "\n${MSG_IG}Atomically replacing the executable... ${NC}"
     if ! mv -f "$staged_path" "$BIN_PATH"; then rm -f "$staged_path"; echo_err "${MSG_WR}Replacement failed; rollback will be attempted.${NC}"; exit 1; fi
     echo_n_err "${MSG_IG}Starting ${LBLUE}qbittorrent-nox${NC} ${GREEN}service... ${NC}"
@@ -409,7 +413,7 @@ main() {
     fi
     if [[ ! "$lib_ver_id" =~ ^[0-9A-Za-z._+-]+$ ]]; then echo_err "${MSG_WR}Unexpected libtorrent version identifier: '$lib_ver_id'. Aborting.${NC}"; exit 1; fi
     local final_url="https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-${latest_ver}_v${lib_ver_id}/${arch}-qbittorrent-nox"
-    perform_update "$final_url" "$latest_ver"
+    perform_update "$final_url" "$latest_ver" "$arch"
 }
 
 main "$@"
