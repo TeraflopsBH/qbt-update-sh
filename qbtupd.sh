@@ -990,7 +990,7 @@ uninstall_qbittorrent() {
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err
     echo_err "  Operation : dietpi-software uninstall 46"
-    echo_err "  Service   : $QBT_SERVICE (${was_active:+})"
+    echo_err "  Service   : $QBT_SERVICE"
     if [[ "$was_active" -eq 1 ]]; then
         echo_err "  State     : currently active; it will be stopped before uninstall."
     elif [[ -n "$config_path" ]]; then
