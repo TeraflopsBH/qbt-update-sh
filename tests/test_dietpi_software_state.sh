@@ -22,3 +22,24 @@ assert_state "legacy numeric machine-readable ID" '46|2|qBittorrent|description'
 assert_state "legacy human-readable uppercase ID" 'ID 46 | =2 | qBittorrent |' "2"
 assert_state "legacy human-readable lowercase ID" 'id 46 | =0 | qBittorrent |' "0"
 assert_state "unrelated list without qBittorrent" 'samba|2|Samba|description' "unknown"
+
+# Binary restore points created by the updater must map to the exact config
+# snapshot carrying the same timestamp/PID suffix.
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf -- "$tmp_dir"' EXIT
+binary_backup="/usr/bin/qbittorrent-nox.20261029_123456_321.bak"
+expected_config="$tmp_dir/qBittorrent.conf.20261029_123456_321.bak"
+printf 'test config\n' > "$expected_config"
+actual_config="$(config_snapshot_for_binary "$binary_backup" "$tmp_dir")"
+if [[ "$actual_config" != "$expected_config" ]]; then
+    printf 'FAIL: paired config lookup: expected <%s>, got <%s>\n' "$expected_config" "$actual_config" >&2
+    exit 1
+fi
+printf 'PASS: binary backup finds its paired configuration snapshot\n'
+
+rm -f -- "$expected_config"
+if config_snapshot_for_binary "$binary_backup" "$tmp_dir" >/dev/null; then
+    printf 'FAIL: missing paired config should not resolve\n' >&2
+    exit 1
+fi
+printf 'PASS: legacy executable backup without config snapshot is detected\n'
