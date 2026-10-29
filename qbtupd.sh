@@ -95,7 +95,9 @@ cleanup() {
                 if systemctl start "$QBT_SERVICE"; then
                     local retries=10
                     while (( retries > 0 )); do
-                        systemctl is-active --quiet "$QBT_SERVICE" && break
+                        if systemctl is-active --quiet "$QBT_SERVICE"; then
+                            break
+                        fi
                         sleep 1
                         retries=$((retries - 1))
                     done
@@ -470,7 +472,7 @@ fetch_release_data() {
 
 perform_update() {
     local url="$1" expected_version="$2" expected_arch="$3"
-    local download_path candidate_version file_description timestamp staged_path retries
+    local download_path candidate_version candidate_version_number expected_version_number file_description timestamp retries
     echo_n_err "${MSG_IG}Making temporary download directory....................     ${NC}"
     TMP_DIR="$(mktemp -d)"; download_path="$TMP_DIR/qbittorrent-nox"
     echo_err "${DB_GREEN}  DONE  ${NC}"
@@ -485,12 +487,24 @@ perform_update() {
         aarch64:*aarch64*|x86_64:*x86-64*|armv7:*ARM*|armhf:*ARM*) ;;
         *) echo_err "${MSG_WR}Downloaded ELF architecture does not match requested '$expected_arch' artifact: $file_description. Existing executable was not changed.${NC}"; exit 1 ;;
     esac
-    if ! candidate_version="$("$download_path" --version 2>&1)"; then echo_err "${MSG_WR}Downloaded executable failed its --version self-test. Existing executable was not changed.${NC}"; exit 1; fi
-    if ! printf '%s\n' "$candidate_version" | grep -Fq "$expected_version"; then
-        echo_err "${MSG_WR}Downloaded executable version does not match metadata version $expected_version. Existing executable was not changed.${NC}"
-        echo_err "          Reported version: $candidate_version"; exit 1
+    # curl creates downloads as non-executable files by default. Set the
+    # executable bit before running the candidate's --version self-test.
+    if ! chmod 755 "$download_path"; then
+        echo_err "${MSG_WR}Could not mark the candidate executable for validation. Existing executable was not changed.${NC}"
+        exit 1
     fi
-    chmod 755 "$download_path"
+    if ! candidate_version="$("$download_path" --version 2>&1)"; then
+        echo_err "${MSG_WR}Downloaded executable failed its --version self-test. Existing executable was not changed.${NC}"
+        exit 1
+    fi
+    candidate_version_number="$(printf '%s\n' "$candidate_version" | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 || true)"
+    expected_version_number="${expected_version%%[-+]*}"
+    if [[ -z "$candidate_version_number" || "$candidate_version_number" != "$expected_version_number" ]]; then
+        echo_err "${MSG_WR}Downloaded executable version does not match metadata version $expected_version. Existing executable was not changed.${NC}"
+        echo_err "          Parsed candidate version: ${candidate_version_number:-unrecognized}"
+        echo_err "          Reported version: $candidate_version"
+        exit 1
+    fi
     STAGED_PATH="/usr/bin/.qbittorrent-nox.new.$BASHPID"
     if ! cp "$download_path" "$STAGED_PATH" || ! chmod 755 "$STAGED_PATH"; then
         rm -f "$STAGED_PATH"
@@ -505,7 +519,12 @@ perform_update() {
         exit 1
     fi
     timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
-    if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then rm -f "$staged_path"; echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"; exit 1; fi
+    if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then
+        rm -f "$STAGED_PATH"
+        STAGED_PATH=""
+        echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"
+        exit 1
+    fi
     echo_err "${MSG_IG}Created rollback backup: ${LYELLOW}$BACKUP_FILE${NC}"
     if systemctl is-active --quiet "$QBT_SERVICE"; then
         SERVICE_WAS_ACTIVE=1
@@ -546,7 +565,6 @@ main() {
     sleep 1
     
     check_root
-    print_startup_warning
 
     # Check for DietPi
     echo_n_err "\n        ${GREEN}- Detecting ${LYELLOW}DietPi${NC} ${GREEN}installation...                         ${NC}"
@@ -556,6 +574,8 @@ main() {
         echo_err "${DB_RED} ABSENT  ${NC}\n\n       ${LYELLOW}This script is intended for DietPi system.${NC}\n       ${LRED}Script will now abort.${NC}\n"
         exit 1
     fi
+
+    print_startup_warning
 
     # Install all missing helper tools before using curl, jq, or file.
     ensure_dependencies
