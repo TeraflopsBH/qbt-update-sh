@@ -102,7 +102,7 @@ sudo bash qbtupd.sh
 
 ## Testing status
 
-The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, and the software-state/config-snapshot/menu-routing checks, including the menu's cancellation return paths, then tested in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
+The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, the software-state/config-snapshot tests, and `tests/test_menu_cancellation.sh`, which simulates the main-menu dispatcher and verifies that cancelled/finished operations return to the menu. Then test in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
 ## Upstream project
 
