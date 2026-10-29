@@ -252,7 +252,7 @@ ensure_dependencies() {
     if ! confirm_action "Install the missing helper packages now using APT?"; then
         echo_err
         echo_err "${MSG_WY}Dependency installation declined. Nothing has been installed by this updater.${NC}"
-        exit 0
+        return 2
     fi
 
     echo_err
@@ -393,7 +393,7 @@ get_architecture_interactive() {
         fi
         echo_err "           1. ${LBLUE}aarch64${NC}"
         echo_err "           2. ${LYELLOW}x86_64${NC}"
-        echo_err "           3. ${LRED}Abort${NC}"
+        echo_err "           3. ${LRED}Cancel and return to main menu${NC}"
         echo_err "${YELLOW}          -----------------------${NC}"
         echo_err
         echo_n_err " ${LYELLOW}Choice: ${NC}"
@@ -413,7 +413,7 @@ get_architecture_interactive() {
                 ;;
             1) selected_arch="aarch64"; break ;;
             2) selected_arch="x86_64"; break ;;
-            3) echo_err "${MSG_WR}Aborting the script.${NC}\n"; exit 1 ;;
+            3) echo_err "${MSG_WY}Architecture selection cancelled.${NC}\n"; return 1 ;;
             *) echo_err "${MSG_WY}Invalid selection.${NC}\n" ;;
         esac
     done
@@ -433,15 +433,17 @@ get_libtorrent_version() {
         echo_err "${YELLOW}          -----------------------------${NC}"
         echo_err "           1. ${LMAGENTA}libtorrent 2.0${NC} ${GREEN}(${LCYAN}default${GREEN})${NC}"
         echo_err "           2. ${LBLUE}libtorrent 1.2${NC}"
+        echo_err "           0. ${LRED}Cancel and return to main menu${NC}"
         echo_err "${YELLOW}          -----------------------------${NC}"
         echo_err
-        echo_n_err "\n ${GREEN}Enter choice ${LYELLOW}${BOLD}${ULINE}[1]${NC}${GREEN} or ${LYELLOW}${BOLD}${ULINE}[2]${NC}: "
+        echo_n_err "\n ${GREEN}Enter choice ${LYELLOW}${BOLD}${ULINE}[1]${NC}${GREEN}, ${LYELLOW}${BOLD}${ULINE}[2]${NC}, or ${LYELLOW}${BOLD}${ULINE}[0]${NC}: "
         
         read -r choice < /dev/tty || choice="1"
 
         case "$choice" in
             1|"") ver="2.0"; break ;;
             2)    ver="1.2"; break ;;
+            0)    echo_err "\n${MSG_WY}Libtorrent selection cancelled.${NC}\n"; return 1 ;;
             *)    echo_err "\n${MSG_WY}Invalid choice.${NC}\n" ;;
         esac
     done
@@ -483,6 +485,7 @@ manage_backups() {
     echo_err "           1. ${LGREEN}Keep all${NC}"
     echo_err "           2. ${LYELLOW}Keep current + newest previous backup${NC}"
     echo_err "           3. ${LRED}Delete all previous backups (keep current)${NC}"
+    echo_err "           0. ${LCYAN}Skip cleanup and return to main menu${NC}"
     echo_err "          ${YELLOW}-----------------------------------------${NC}"
     echo_n_err "\n${GREEN}Enter choice ${LYELLOW}${BOLD}${ULINE}[1]${NC}: "
     
@@ -491,6 +494,7 @@ manage_backups() {
     choice=${choice:-1}
 
     case "$choice" in
+        0) echo_err "\n${MSG_IG}Backup cleanup skipped; all backups were left unchanged.${NC}" ;;
         1) echo_err "\n${MSG_IG}Keeping current and all previous backups.${NC}" ;;
         2) 
             echo_n_err "\n${MSG_IG}Cleaning up old backups.............                        ${NC}"
@@ -897,7 +901,7 @@ install_qbittorrent_via_dietpi() {
 
     if ! confirm_action "Run DietPi's $command_name command for qBittorrent (ID 46) now?"; then
         echo_err "${MSG_WY}Installation/repair declined. No update was attempted.${NC}"
-        return 1
+        return 2
     fi
 
     echo_err "${MSG_IG}Running DietPi qBittorrent $command_name...${NC}"
@@ -1604,65 +1608,26 @@ perform_update() {
 # MAIN
 ################################################################
 
-main() {
-    print_logo
-    
-    echo_n_err "\n\n${MSG_IG}Executing some preflight checks...${NC} \n"
-    if command -v sleep >/dev/null 2>&1; then sleep 1; fi
-    
-    check_root
+run_update_workflow() {
+    local dependency_status
 
-    # Check for DietPi
-    echo_n_err "\n        ${GREEN}- Detecting ${LYELLOW}DietPi${NC} ${GREEN}installation...                         ${NC}"
-    if [ -f "$DIETPI_SERVICES" ]; then
-        echo_err "${DB_GREEN} PRESENT ${NC}"
-    else
-        echo_err "${DB_RED} ABSENT  ${NC}\n\n       ${LYELLOW}This script is intended for DietPi system.${NC}\n       ${LRED}Script will now abort.${NC}\n"
-        exit 1
+    print_startup_warning
+    if ! confirm_action "Continue with the update workflow?"; then
+        echo_err "\n${MSG_WY}Update cancelled. No changes have been made; returning to main menu.${NC}\n"
+        return 2
     fi
 
-    local action
-    while true; do
-        action="$(get_main_menu_choice)"
-        [[ "$action" == "install" ]] || break
-        # Installation is a separate, explicit action. Once DietPi succeeds,
-        # show the menu again; do not silently continue into a binary update.
-        if ! install_qbittorrent_via_dietpi; then
-            echo_err "${MSG_IG}Exited without updating qBittorrent.${NC}"
-            exit 0
+    if ensure_dependencies update; then
+        :
+    else
+        dependency_status=$?
+        if (( dependency_status == 2 )); then
+            echo_err "${MSG_IG}Returning to main menu without updating.${NC}"
+            return 2
         fi
-    done
-
-    case "$action" in
-        exit)
-            echo_err "\n${MSG_IG}Exited without making changes.${NC}"
-            exit 0
-            ;;
-        restore)
-            # Restore is a local operation; no GitHub release check is needed.
-            ensure_dependencies restore
-            restore_backup
-            return 0
-            ;;
-        uninstall)
-            ensure_dependencies uninstall
-            uninstall_qbittorrent
-            return 0
-            ;;
-        update)
-            print_startup_warning
-            if ! confirm_action "Continue with the update workflow?"; then
-                echo_err "\n${MSG_WY}Cancelled. No changes have been made.${NC}\n"
-                exit 0
-            fi
-            ensure_dependencies update
-            check_internet
-            ;;
-        *)
-            echo_err "${MSG_WR}Unknown main-menu action. Aborting safely.${NC}"
-            exit 1
-            ;;
-    esac
+        return "$dependency_status"
+    fi
+    check_internet
 
     # The main menu only returns "update" when both components exist. Keep
     # this independent guard in case the installation changes after selection.
@@ -1721,9 +1686,15 @@ main() {
     echo_err "  or replacing the installed executable."
     echo_err
     local arch
-    arch="$(get_architecture_interactive)"
+    if ! arch="$(get_architecture_interactive)"; then
+        echo_err "${MSG_WY}Update cancelled during architecture selection. Returning to main menu.${NC}"
+        return 2
+    fi
     local lib_ver
-    lib_ver="$(get_libtorrent_version)"
+    if ! lib_ver="$(get_libtorrent_version)"; then
+        echo_err "${MSG_WY}Update cancelled during libtorrent selection. Returning to main menu.${NC}"
+        return 2
+    fi
     local lib_ver_id
     if [[ "$lib_ver" == "2.0" ]]; then
         lib_ver_id="$(printf '%s' "$json_data" | jq -er '.libtorrent_2_0 | strings | select(length > 0)')" || { echo_err "${MSG_WR}Metadata is missing libtorrent_2_0. Aborting before stopping the service.${NC}"; exit 1; }
@@ -1736,7 +1707,7 @@ main() {
     print_update_warning "$current_ver" "$latest_ver" "$arch" "$lib_ver"
     if ! confirm_action "Download and install this build now?"; then
         echo_err "\n${MSG_WY}Update cancelled. The updater did not stop the service or replace the executable.${NC}\n"
-        exit 0
+        return 2
     fi
 
     echo_err
@@ -1746,6 +1717,96 @@ main() {
 
     perform_update "$final_url" "$latest_ver" "$arch"
 }
+
+main() {
+    print_logo
+
+    echo_n_err "\n\n${MSG_IG}Executing some preflight checks...${NC} \n"
+    if command -v sleep >/dev/null 2>&1; then sleep 1; fi
+
+    check_root
+
+    # Check for DietPi
+    echo_n_err "\n        ${GREEN}- Detecting ${LYELLOW}DietPi${NC} ${GREEN}installation...                         ${NC}"
+    if [[ -f "$DIETPI_SERVICES" ]]; then
+        echo_err "${DB_GREEN} PRESENT ${NC}"
+    else
+        echo_err "${DB_RED} ABSENT  ${NC}\n\n       ${LYELLOW}This script is intended for DietPi system.${NC}\n       ${LRED}Script will now abort.${NC}\n"
+        exit 1
+    fi
+
+    local action operation_status
+    while true; do
+        action="$(get_main_menu_choice)"
+        case "$action" in
+            exit)
+                echo_err "\n${MSG_IG}Exited without making changes.${NC}"
+                return 0
+                ;;
+            install)
+                if install_qbittorrent_via_dietpi; then
+                    # Installation is a separate step. Show the menu again and
+                    # require a separate user choice before beginning an update.
+                    continue
+                else
+                    operation_status=$?
+                    if (( operation_status == 2 )); then
+                        echo_err "${MSG_IG}Installation/repair cancelled; returning to main menu.${NC}"
+                        continue
+                    fi
+                    return "$operation_status"
+                fi
+                ;;
+            restore)
+                # Restore is local; it does not need GitHub access.
+                if ensure_dependencies restore; then
+                    restore_backup
+                    echo_err "${MSG_IG}Returning to main menu.${NC}"
+                    continue
+                else
+                    operation_status=$?
+                    if (( operation_status == 2 )); then
+                        echo_err "${MSG_IG}Restore setup cancelled; returning to main menu.${NC}"
+                        continue
+                    fi
+                    return "$operation_status"
+                fi
+                ;;
+            uninstall)
+                if ensure_dependencies uninstall; then
+                    uninstall_qbittorrent
+                    echo_err "${MSG_IG}Returning to main menu.${NC}"
+                    continue
+                else
+                    operation_status=$?
+                    if (( operation_status == 2 )); then
+                        echo_err "${MSG_IG}Uninstall setup cancelled; returning to main menu.${NC}"
+                        continue
+                    fi
+                    return "$operation_status"
+                fi
+                ;;
+            update)
+                if run_update_workflow; then
+                    echo_err "${MSG_IG}Update workflow finished; returning to main menu.${NC}"
+                    continue
+                else
+                    operation_status=$?
+                    if (( operation_status == 2 )); then
+                        echo_err "${MSG_IG}Operation cancelled; returning to main menu.${NC}"
+                        continue
+                    fi
+                    return "$operation_status"
+                fi
+                ;;
+            *)
+                echo_err "${MSG_WR}Unknown main-menu action. Aborting safely.${NC}"
+                return 1
+                ;;
+        esac
+    done
+}
+
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     main "$@"
