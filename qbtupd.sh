@@ -586,7 +586,13 @@ print_restore_warning() {
     echo_err "  will be restored after a successful operation."
     echo_err
     echo_err "  This restores the executable only, not settings, torrent state or other"
-    echo_err "  application data. The selected backup and safety backup are retained."
+    echo_err "  application data."
+    if [[ "$target_existed" -eq 1 ]]; then
+        echo_err "  The selected source backup and new safety backup are retained."
+    else
+        echo_err "  The selected source backup is retained; no pre-restore executable"
+        echo_err "  copy exists because the target was absent."
+    fi
     echo_err "  If restoration or service startup fails, rollback is best-effort."
     echo_err
     echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
