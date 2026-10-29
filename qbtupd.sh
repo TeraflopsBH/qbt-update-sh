@@ -917,16 +917,6 @@ install_qbittorrent_via_dietpi() {
     return 0
 }
 
-detect_qbt_component_mode() {
-    local binary_exists=0 unit_exists=0
-    [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
-    if command -v systemctl >/dev/null 2>&1 &&
-       systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
-        unit_exists=1
-    fi
-    qbt_component_mode "$binary_exists" "$unit_exists"
-}
-
 get_main_menu_choice() {
     local backup_count current_version="UNKNOWN" current_output="" service_status="Unknown"
     local software_state software_display choice next_choice=2
