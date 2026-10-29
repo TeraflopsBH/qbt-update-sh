@@ -553,7 +553,10 @@ get_main_menu_choice() {
         case "$choice" in
             1) echo "update"; return 0 ;;
             2) if (( backup_count > 0 )); then echo "restore"; else echo "exit"; fi; return 0 ;;
-            3) if (( backup_count > 0 )); then echo "exit"; fi ;;
+            3)
+                if (( backup_count > 0 )); then echo "exit"; return 0; fi
+                echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}"
+                ;;
             *) echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}" ;;
         esac
     done
