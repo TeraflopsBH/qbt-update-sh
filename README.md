@@ -8,11 +8,14 @@ A Bash updater for `qbittorrent-nox` on DietPi. It downloads the static executab
 
 ## What the updater does
 
-On launch, the script verifies root privileges and checks for the DietPi marker. It then opens a main menu showing the installed qBittorrent version, service status, and the number of local backups:
+On launch, the script verifies root privileges and checks for the DietPi marker. It then reads DietPi's machine-readable software list to determine whether qBittorrent software ID 46 is installed. The main menu shows the installed qBittorrent version, service status, DietPi software state, and number of local executable backups:
 
 - **Update qBittorrent** — follows the interactive update workflow described below.
-- **Restore a previous backup** — appears when backup files using this updater's naming pattern are found. Restoration is local and does not perform a GitHub release check.
+- **Restore a previous backup** — offered only when DietPi confirms software ID 46 is installed and updater backup files exist.
+- **Uninstall qBittorrent through DietPi** — offered only when DietPi confirms software ID 46 is installed.
 - **Exit** — leaves the system unchanged.
+
+If DietPi cannot verify the software state, restore and uninstall are disabled rather than guessing from leftover files.
 
 ### Update workflow
 
@@ -29,23 +32,34 @@ On launch, the script verifies root privileges and checks for the DietPi marker.
 
 ### Restore workflow
 
-1. Scans the timestamped backup filename pattern `/usr/bin/qbittorrent-nox.*.bak` and presents compatible backups newest first.
-2. Skips files that are not regular, non-empty ELF executables, do not match the detected host architecture, or fail their `--version` self-test.
-3. Shows each candidate's qBittorrent version, filename and size, then asks the user to select one and confirm the restore.
-4. Stages the selected executable before stopping the service. If an executable is currently installed, it first saves that version as a new timestamped safety backup. If the target is missing, failed restoration attempts return it to the missing state.
-5. Replaces the executable and preserves the service's prior active/inactive state. If a previously active service fails to start, the script attempts to restore the pre-restore executable and restart the service.
-6. Retains both the selected source backup and any newly created safety backup; restore does not run the older-backup cleanup menu.
+1. Requires DietPi to report qBittorrent software ID 46 as installed. A leftover service file or executable backup alone is not treated as proof that the complete installation exists.
+2. Verifies that `qbittorrent.service` points to `/usr/bin/qbittorrent-nox` and locates the non-empty qBittorrent configuration file associated with that service's user/profile. If the existing configuration cannot be located, restore is refused rather than risking startup with a new profile and default WebUI credentials or port.
+3. Scans `/usr/bin/qbittorrent-nox.*.bak` and presents compatible backups newest first. Files must be regular, non-empty ELF executables, match the detected host architecture, and pass their `--version` self-test.
+4. Shows each candidate's qBittorrent version, filename and size, then asks the user to select one and confirm the restore.
+5. Stages the selected executable before stopping the service. If an executable is currently installed, it saves that version as a new timestamped safety backup. It also saves a private pre-restore copy of `qBittorrent.conf` under `/var/backups/qbt-update-sh/`, using a root-private directory and restrictive file permissions.
+6. Replaces the executable and preserves the service's prior active/inactive state. If a previously active service fails to start, the script attempts to restore the pre-restore executable and configuration.
+7. Checks whether the restored binary changed the configuration file on startup. If it did, the script offers to reapply the pre-restore configuration and restart qBittorrent. If the selected binary cannot start with that configuration, it attempts to return to the config it generated and restart the service. If recovery fails, executable rollback is attempted.
+8. Retains the selected source executable backup, any new executable safety backup, and the configuration snapshots. Restore does not run the older-executable-backup cleanup menu.
 
-Restoration covers the executable only. It does not roll back qBittorrent configuration, torrent state, or other application data. Automatic rollback is best-effort, so keep separate backups of important system configuration.
+Restoring an executable does not roll back downloaded files or the full torrent session state. Configuration recovery is best-effort; retain the displayed configuration snapshot path if WebUI credentials or ports need to be recovered manually.
 
-The updater does not publish releases or change release assets. The update workflow does not intentionally modify existing qBittorrent settings. If qBittorrent was absent, the separately approved DietPi installation may create its initial configuration.
+### Uninstall workflow
+
+1. Offered only when DietPi confirms qBittorrent software ID 46 is installed.
+2. Shows a confirmation screen and asks permission before running `/boot/dietpi/dietpi-software uninstall 46`.
+3. Stops the service when it is active and saves a private copy of `qBittorrent.conf` first if the service profile can be identified.
+4. Leaves the updater's timestamped executable backups untouched and checks DietPi's reported software state after uninstall.
+
+The uninstall action deliberately delegates software removal to DietPi rather than manually deleting package files or service definitions. The configuration snapshot protects settings such as the WebUI username, password hash and port, but it does not include downloaded payloads or the complete torrent session state. DietPi may remove qBittorrent's user/profile data as part of its own uninstall process.
+
+The updater does not publish releases or change release assets. The binary-update workflow does not intentionally modify existing qBittorrent settings. If qBittorrent was absent, the separately approved DietPi installation may create its initial configuration.
 
 ## Requirements
 
 - DietPi Linux, APT (`apt-get`), and the expected `qbittorrent.service` systemd unit. The `systemctl` command must already be available.
 - Root privileges. When run as a non-root user, the script explains the requirement and exits; it does not automatically re-run itself through `sudo`.
 - The updater checks for every external helper command it uses. If commands are missing, it lists the required packages and asks for consent before running `apt-get update` and installing only those packages, with `--no-install-recommends --no-upgrade`. It verifies the commands again after installation. No package installation happens without an explicit yes.
-- An interactive terminal (the script reads confirmations and menu choices from `/dev/tty`). The update workflow requires HTTPS access to GitHub; restoring a local backup does not require GitHub access. If helper packages are missing, installing them through APT may require network access.
+- An interactive terminal (the script reads confirmations and menu choices from `/dev/tty`), the DietPi software manager, and `systemctl`. The update workflow requires HTTPS access to GitHub; restoring a local backup does not require GitHub access. If helper packages are missing, installing them through APT may require network access.
 
 ## Usage
 
@@ -71,9 +85,11 @@ sudo bash qbtupd.sh
 
 ## Recovery notes
 
-- The main menu offers local restore when backup files matching `/usr/bin/qbittorrent-nox.*.bak` exist. Only compatible backups that pass the executable checks are selectable.
-- When an executable is present, restore first creates a safety backup of it. If the executable is missing, a failed restore attempts to return the target to that absent state.
-- Restore retains the chosen source backup and any safety backup. It does not run the backup-cleanup menu.
+- The main menu offers restore only when DietPi confirms software ID 46 is installed and backup files matching `/usr/bin/qbittorrent-nox.*.bak` exist. Only compatible backups that pass the executable checks are selectable.
+- Restore requires the existing qBittorrent configuration and keeps a private copy in `/var/backups/qbt-update-sh/`. If the selected binary changes the config on startup, the script offers to reapply the previous config; if that cannot start, it attempts to recover using the generated config.
+- When an executable is present, restore creates a safety backup of it. If the executable is missing, a failed restore attempts to return the target to that absent state.
+- Restore retains the chosen source backup and any safety backups. It does not run the executable-backup cleanup menu.
+- The uninstall menu action runs `dietpi-software uninstall 46` only after explicit confirmation, preserves a private qBittorrent configuration copy when one can be identified, and leaves updater executable backups untouched.
 - After a successful update, the current update's backup is never removed by the cleanup menu. The options only manage older backups.
 - If the service does not start after an update, inspect logs with `journalctl -u qbittorrent.service`.
 - Automatic rollback is best-effort. If the service was active before the update, the script attempts to restart it after rollback; if it was inactive, the script leaves it stopped.
@@ -81,7 +97,7 @@ sudo bash qbtupd.sh
 
 ## Testing status
 
-The script changes should be checked with `bash -n qbtupd.sh` and ShellCheck, then tested in a disposable DietPi environment before using them on a live installation. In particular, test HTTP failures, malformed metadata, wrong-architecture downloads, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
+The script changes should be checked with `bash -n qbtupd.sh` and ShellCheck, then tested in a disposable DietPi environment before using them on a live installation. In particular, test HTTP failures, malformed metadata, wrong-architecture downloads, restoring when software ID 46 is absent, configuration changes after restore, both configuration-recovery paths, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
 ## Upstream project
 
