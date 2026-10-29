@@ -293,25 +293,18 @@ print_update_warning() {
     echo_err "${DB_YELLOW}                      FINAL UPDATE CONFIRMATION                       ${NC}"
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err
-    echo_err "  Current qBittorrent version : ${LYELLOW}${current_version}${NC}"
-    echo_err "  Latest qBittorrent version  : ${LGREEN}${latest_version}${NC}"
-    echo_err "  Selected architecture       : ${LCYAN}${selected_arch}${NC}"
-    echo_err "  Selected libtorrent         : ${LCYAN}${selected_libtorrent}${NC}"
+    echo_err "  qBittorrent version : ${LYELLOW}${current_version}${NC}  ->  ${LGREEN}${latest_version}${NC}"
+    echo_err "  Selected build      : ${LCYAN}${selected_arch}${NC}, libtorrent ${LCYAN}${selected_libtorrent}${NC}"
+    echo_err "  Target executable   : ${LBLUE}$BIN_PATH${NC}"
     echo_err
-    echo_err "  Target executable:"
-    echo_err "      ${LBLUE}$BIN_PATH${NC}"
+    echo_err "  If approved, the updater will:"
+    echo_err "      1. Download and validate the selected third-party binary."
+    echo_err "      2. Create a timestamped backup of the existing executable."
+    echo_err "      3. Stop the service, replace the binary, and restart the service."
     echo_err
-    echo_err "  If you continue, the updater will:"
-    echo_err "      1. Download the selected third-party binary."
-    echo_err "      2. Validate its file type, architecture, and reported version."
-    echo_err "      3. Create a timestamped backup of the current executable."
-    echo_err "      4. Stop the service, replace the binary, and start the service."
-    echo_err
-    echo_err "  If replacement or startup fails, the updater will try to restore"
-    echo_err "  the previous binary and restore the service's prior running state."
-    echo_err
-    echo_err "  No binary replacement or service stop occurs before validation."
-    echo_err "  Rollback cannot fix unrelated service or configuration problems."
+    echo_err "  On failure, it attempts to restore the old binary and prior service state."
+    echo_err "  No replacement or service stop occurs before validation."
+    echo_err "  Rollback is best-effort; qBittorrent settings are not intentionally changed."
     echo_err
     echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
     echo_err
@@ -701,7 +694,7 @@ main() {
 
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
-    echo_err "${DB_MAGENTA}                         RELEASE VERSION CHECK                         ${NC}"
+    echo_err "${DB_MAGENTA}                        RELEASE VERSION CHECK                         ${NC}"
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err
     echo_err "  Installed qBittorrent : ${LYELLOW}${current_ver}${NC}"
