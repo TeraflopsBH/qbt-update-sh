@@ -514,7 +514,7 @@ manage_backups() {
 
 dietpi_qbt_software_state() {
     # DietPi's machine-readable software list marks installed software with state 2.
-    local output line software_id software_state remainder
+    local output line software_id software_state
     if [[ ! -x "/boot/dietpi/dietpi-software" ]]; then
         printf '%s\n' "unknown"
         return 0
