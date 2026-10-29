@@ -1040,7 +1040,7 @@ restore_backup() {
 }
 
 uninstall_qbittorrent() {
-    local state service_execstart was_active=0 config_path=""
+    local service_execstart was_active=0 config_path=""
     local result_state
 
     if ! require_dietpi_qbt_installed "uninstall"; then exit 1; fi
@@ -1058,6 +1058,10 @@ uninstall_qbittorrent() {
         fi
         if systemctl is-active --quiet "$QBT_SERVICE"; then was_active=1; fi
         config_path="$(resolve_qbt_config_path 2>/dev/null || true)"
+    else
+        # DietPi documents this as the default qBittorrent profile path.
+        config_path="/home/qbittorrent/.config/qBittorrent/qBittorrent.conf"
+        [[ -s "$config_path" ]] || config_path=""
     fi
 
     echo_err
