@@ -730,8 +730,12 @@ print_restore_warning() {
     echo_err "  The service will be stopped only for replacement and its prior state"
     echo_err "  will be restored after a successful operation."
     echo_err
-    echo_err "  This restores the executable only, not settings, torrent state or other"
-    echo_err "  application data."
+    echo_err "  qBittorrent config : ${LCYAN}$QBT_CONFIG_PATH${NC}"
+    echo_err "  A private snapshot of this configuration will be saved before"
+    echo_err "  replacement. If startup rewrites the file, the snapshot is retained."
+    echo_err
+    echo_err "  This restores the executable only, not torrent state, downloads or"
+    echo_err "  other application data."
     if [[ "$target_existed" -eq 1 ]]; then
         echo_err "  The selected source backup and new safety backup are retained."
     else
@@ -749,6 +753,7 @@ restore_backup() {
     local selected_index="" selected_path="" selected_version="" timestamp retries
     local -a backup_files=() sorted_backups=() restore_candidates=() restore_versions=()
 
+    if ! require_dietpi_qbt_installed "restore"; then exit 1; fi
     if [[ -L "$BIN_PATH" || ( -e "$BIN_PATH" && ! -f "$BIN_PATH" ) ]]; then
         echo_err "${MSG_WR}Target path is a symlink or non-regular file. Refusing to replace it: $BIN_PATH${NC}"
         exit 1
@@ -761,6 +766,20 @@ restore_backup() {
     if [[ "$service_execstart" != *"$BIN_PATH"* ]]; then
         echo_err "${MSG_WR}$QBT_SERVICE does not appear to execute $BIN_PATH. Refusing to restore a binary the service may not use.${NC}"
         echo_err "  ExecStart: ${service_execstart:-unavailable}"
+        exit 1
+    fi
+
+    if ! QBT_CONFIG_PATH="$(resolve_qbt_config_path)"; then
+        echo_err
+        echo_err "${MSG_WR}Could not locate the existing qBittorrent configuration for the service account/profile.${NC}"
+        echo_err "  Refusing to restore and start a binary without confirming the existing configuration."
+        echo_err "  Otherwise qBittorrent could start with a fresh profile and default WebUI credentials/port."
+        echo_err "  Expected default location for the service account: ~/.config/qBittorrent/qBittorrent.conf"
+        exit 1
+    fi
+    if [[ ! -s "$QBT_CONFIG_PATH" ]]; then
+        echo_err "${MSG_WR}The qBittorrent configuration is missing or empty: $QBT_CONFIG_PATH${NC}"
+        echo_err "  Refusing to start the restored binary with a potentially new profile."
         exit 1
     fi
 
@@ -885,6 +904,12 @@ restore_backup() {
     UPDATE_IN_PROGRESS=1
     stop_service
 
+    if ! CONFIG_BACKUP_FILE="$(save_qbt_config_backup "$QBT_CONFIG_PATH")"; then
+        echo_err "${MSG_WR}Restore aborted because qBittorrent configuration could not be preserved.${NC}"
+        exit 1
+    fi
+    echo_err "${MSG_IG}Pre-restore configuration snapshot saved: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+
     echo_err "\n${MSG_IG}Restoring qBittorrent ${LYELLOW}$selected_version${NC}..."
     if ! mv -f -- "$STAGED_PATH" "$BIN_PATH"; then
         echo_err "${MSG_WR}Replacement failed. Automatic rollback will be attempted.${NC}"
@@ -916,6 +941,15 @@ restore_backup() {
     echo_err "${DB_GREEN}  DONE  ${NC}"
     echo_err
     echo_err "${MSG_IG}Restore successful: qBittorrent $selected_version is installed.${NC}"
+    if [[ -f "$QBT_CONFIG_PATH" && -f "$CONFIG_BACKUP_FILE" ]]; then
+        if cmp -s -- "$QBT_CONFIG_PATH" "$CONFIG_BACKUP_FILE"; then
+            echo_err "${MSG_IG}qBittorrent configuration remained unchanged during restore.${NC}"
+        else
+            echo_err "${MSG_WY}qBittorrent modified its configuration when the restored binary started.${NC}"
+            echo_err "  Your pre-restore configuration is retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+            echo_err "  If WebUI credentials or port changed, stop the service before restoring that copy."
+        fi
+    fi
     if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
         echo_err "${MSG_IG}$QBT_SERVICE is active.${NC}"
     else
@@ -927,6 +961,120 @@ restore_backup() {
         echo_err "${MSG_IG}No pre-restore executable backup was needed because the target was absent.${NC}"
     fi
     echo_err "${MSG_IG}The selected source backup was retained: ${LYELLOW}$selected_path${NC}"
+}
+
+uninstall_qbittorrent() {
+    local state service_execstart was_active=0 config_path=""
+    local result_state
+
+    if ! require_dietpi_qbt_installed "uninstall"; then exit 1; fi
+
+    if systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
+        service_execstart="$(systemctl show -p ExecStart --value "$QBT_SERVICE" 2>/dev/null || true)"
+        if [[ -n "$service_execstart" && "$service_execstart" != *"$BIN_PATH"* ]]; then
+            echo_err "${MSG_WR}$QBT_SERVICE does not appear to execute $BIN_PATH.${NC}"
+            echo_err "  ExecStart: $service_execstart"
+            echo_err "  DietPi software ID 46 is installed, but the service looks customized."
+            if ! confirm_action "Continue with DietPi's uninstall anyway?"; then
+                echo_err "${MSG_WY}Uninstall cancelled. No changes were made.${NC}"
+                return 0
+            fi
+        fi
+        if systemctl is-active --quiet "$QBT_SERVICE"; then was_active=1; fi
+        config_path="$(resolve_qbt_config_path 2>/dev/null || true)"
+    fi
+
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_RED}                         UNINSTALL CONFIRMATION                         ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  Operation : dietpi-software uninstall 46"
+    echo_err "  Service   : $QBT_SERVICE (${was_active:+})"
+    if [[ "$was_active" -eq 1 ]]; then
+        echo_err "  State     : currently active; it will be stopped before uninstall."
+    elif [[ -n "$config_path" ]]; then
+        echo_err "  State     : currently inactive."
+    else
+        echo_err "  State     : service unit or standard config profile was not detected."
+    fi
+    if [[ -n "$config_path" && -s "$config_path" ]]; then
+        echo_err "  Config    : ${LCYAN}$config_path${NC}"
+        echo_err "  A private copy of qBittorrent.conf will be saved under:"
+        echo_err "            ${LYELLOW}$CONFIG_BACKUP_DIR${NC}"
+    else
+        echo_err "  ${LYELLOW}No existing qBittorrent.conf was located; there will be no config safety copy.${NC}"
+    fi
+    echo_err
+    echo_err "  DietPi will manage removal of software ID 46 and its service."
+    echo_err "  This updater will NOT delete downloaded files or updater executable backups."
+    echo_err "  However, DietPi may remove qBittorrent's user/profile data. This operation"
+    echo_err "  does not back up downloaded payloads or the complete torrent session state."
+    echo_err "  Any retained config copy contains sensitive WebUI settings and is root-protected."
+    echo_err
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+
+    if ! confirm_action "Uninstall qBittorrent through DietPi now?"; then
+        echo_err "${MSG_WY}Uninstall cancelled. No changes were made.${NC}"
+        return 0
+    fi
+
+    if [[ "$was_active" -eq 1 ]]; then
+        echo_err "${MSG_IG}Stopping $QBT_SERVICE before preserving its configuration...${NC}"
+        if ! systemctl stop "$QBT_SERVICE"; then
+            echo_err "${MSG_WR}Could not stop $QBT_SERVICE. Uninstall cancelled.${NC}"
+            exit 1
+        fi
+        local retries=10
+        while systemctl is-active --quiet "$QBT_SERVICE" && (( retries > 0 )); do
+            sleep 1
+            retries=$((retries - 1))
+        done
+        if systemctl is-active --quiet "$QBT_SERVICE"; then
+            echo_err "${MSG_WR}$QBT_SERVICE did not stop. Uninstall cancelled.${NC}"
+            systemctl start "$QBT_SERVICE" >/dev/null 2>&1 || true
+            exit 1
+        fi
+    fi
+
+    if [[ -n "$config_path" && -s "$config_path" ]]; then
+        CONFIG_BACKUP_FILE="$(save_qbt_config_backup "$config_path")" || {
+            echo_err "${MSG_WR}Could not preserve qBittorrent.conf. Uninstall cancelled.${NC}"
+            if [[ "$was_active" -eq 1 ]]; then systemctl start "$QBT_SERVICE" >/dev/null 2>&1 || true; fi
+            exit 1
+        }
+        echo_err "${MSG_IG}Configuration safety copy saved: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+    fi
+
+    echo_err
+    echo_err "${MSG_IG}Running DietPi software uninstall for qBittorrent (ID 46)...${NC}"
+    if ! /boot/dietpi/dietpi-software uninstall 46; then
+        echo_err "${MSG_WR}DietPi reported an uninstall failure. The installation may be partially removed; inspect DietPi output before retrying.${NC}"
+        if [[ "$was_active" -eq 1 && -x "$BIN_PATH" ]] && systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
+            systemctl start "$QBT_SERVICE" >/dev/null 2>&1 || true
+        fi
+        exit 1
+    fi
+
+    result_state="$(dietpi_qbt_software_state)"
+    if [[ "$result_state" == "2" ]]; then
+        echo_err "${MSG_WR}DietPi still reports qBittorrent software ID 46 as installed. No files were manually deleted; inspect the DietPi software status.${NC}"
+        if [[ "$was_active" -eq 1 && -x "$BIN_PATH" ]] && systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
+            systemctl start "$QBT_SERVICE" >/dev/null 2>&1 || true
+        fi
+        exit 1
+    elif [[ "$result_state" == "unknown" ]]; then
+        echo_err "${MSG_WY}DietPi's uninstall command returned, but the final software state could not be verified.${NC}"
+    fi
+
+    echo_err
+    echo_err "${DB_GREEN}  DONE  ${NC}"
+    echo_err "${MSG_IG}DietPi qBittorrent uninstall completed.${NC}"
+    if [[ -n "$CONFIG_BACKUP_FILE" ]]; then
+        echo_err "${MSG_IG}Configuration backup retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+    fi
+    echo_err "${MSG_IG}Updater executable backups were left untouched.${NC}"
+    echo_err "  Reinstall qBittorrent through DietPi before using the binary restore menu."
 }
 
 ################################################################
@@ -1084,6 +1232,11 @@ main() {
             # Restore is a local operation; no GitHub release check is needed.
             ensure_dependencies restore
             restore_backup
+            return 0
+            ;;
+        uninstall)
+            ensure_dependencies uninstall
+            uninstall_qbittorrent
             return 0
             ;;
         update)
