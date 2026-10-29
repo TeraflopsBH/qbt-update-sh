@@ -245,7 +245,7 @@ ensure_dependencies() {
     echo_err "      apt-get install --no-install-recommends --no-upgrade ..."
     echo_err
     echo_err "  No qBittorrent executable will be replaced during this step."
-    echo_err "  If you decline, the updater will exit without installing anything."
+    echo_err "  If you decline, no helper packages will be installed and the main menu will reappear."
     echo_err
     echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
 
@@ -965,7 +965,7 @@ get_main_menu_choice() {
 
     # Never offer an update until both the binary and service are present.
     # For an absent or incomplete installation, offer only DietPi repair/install
-    # and exit. Once the action succeeds, main() returns to this menu.
+    # and the menu's Exit option. Once the action succeeds, main() loops here.
     if [[ "$component_mode" != "present" ]]; then
         if [[ "$component_mode" == "absent" ]]; then
             echo_err "  qBittorrent executable and service are both missing."
@@ -1188,7 +1188,7 @@ restore_backup() {
         fi
     done
     echo_err
-    echo_err "  0. ${LRED}Cancel and return to the shell${NC}"
+    echo_err "  0. ${LRED}Cancel and return to the main menu${NC}"
     while true; do
         echo_n_err "\n  ${LYELLOW}Select a backup [0-${#restore_candidates[@]}]: ${NC}"
         read -r selected_index < /dev/tty || selected_index="0"
