@@ -64,6 +64,7 @@ STAGED_PATH=""
 QBT_CONFIG_PATH=""
 CONFIG_BACKUP_FILE=""
 CONFIG_RESTORE_FILE=""
+CONFIG_RESTORE_PAIRED=0
 UPDATE_IN_PROGRESS=0
 SERVICE_WAS_ACTIVE=0
 TARGET_MISSING_BEFORE=0
@@ -682,6 +683,73 @@ remove_config_snapshot_for_binary() {
     fi
 }
 
+select_legacy_config_snapshot() {
+    local -a snapshot_files=() snapshots=()
+    local candidate name snapshot_id linked_binary choice i
+
+    shopt -s nullglob
+    snapshot_files=("$CONFIG_BACKUP_DIR"/qBittorrent.conf.*.bak)
+    shopt -u nullglob
+    if (( ${#snapshot_files[@]} == 0 )); then
+        echo_err "${MSG_WY}No saved configuration snapshots are available for this legacy executable backup.${NC}"
+        return 0
+    fi
+
+    while IFS= read -r candidate; do
+        if [[ -f "$candidate" && ! -L "$candidate" && -s "$candidate" ]]; then
+            snapshots+=("$candidate")
+        fi
+    done < <(printf '%s\n' "${snapshot_files[@]}" | sort -r)
+
+    if (( ${#snapshots[@]} == 0 )); then
+        echo_err "${MSG_WY}No valid saved configuration snapshots were found.${NC}"
+        return 0
+    fi
+
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_YELLOW}              OPTIONAL CONFIG SNAPSHOT FOR LEGACY BACKUP              ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "  This executable backup has no matching pre-update config snapshot."
+    echo_err "  You may select an older saved config if you know it contains the"
+    echo_err "  settings you want. These snapshots are not guaranteed to match this"
+    echo_err "  executable version; choose 0 if unsure and keep the current config."
+    echo_err
+    echo_err "  0. Keep current configuration"
+    for ((i=0; i<${#snapshots[@]}; i++)); do
+        candidate="${snapshots[$i]}"
+        name="${candidate##*/}"
+        snapshot_id="${name#qBittorrent.conf.}"
+        snapshot_id="${snapshot_id%.bak}"
+        linked_binary="/usr/bin/qbittorrent-nox.${snapshot_id}.bak"
+        echo_err "  $((i + 1)). $name"
+        if [[ -f "$linked_binary" && ! -L "$linked_binary" ]]; then
+            echo_err "     ${LGRAY}A matching executable backup exists: ${linked_binary##*/}${NC}"
+        else
+            echo_err "     ${LGRAY}Unpaired config snapshot (created by a previous recovery/operation)${NC}"
+        fi
+    done
+
+    while true; do
+        echo_n_err "\n  ${LYELLOW}Choose a config snapshot [0-${#snapshots[@]}]: ${NC}"
+        read -r choice < /dev/tty || choice="0"
+        choice="${choice:-0}"
+        if [[ "$choice" == "0" ]]; then
+            CONFIG_RESTORE_FILE=""
+            CONFIG_RESTORE_PAIRED=0
+            echo_err "${MSG_IG}Keeping the current config as the starting point for this legacy restore.${NC}"
+            return 0
+        fi
+        if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#snapshots[@]} )); then
+            CONFIG_RESTORE_FILE="${snapshots[$((choice - 1))]}"
+            CONFIG_RESTORE_PAIRED=0
+            echo_err "${MSG_IG}Selected saved config snapshot: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+            return 0
+        fi
+        echo_err "${MSG_WY}Invalid selection. Choose a listed number or 0.${NC}"
+    done
+}
+
 restore_saved_qbt_config() {
     local post_start_config_backup retries=10
     local restore_source="${CONFIG_RESTORE_FILE:-$CONFIG_BACKUP_FILE}"
@@ -846,7 +914,7 @@ get_main_menu_choice() {
 }
 
 print_restore_warning() {
-    local selected_path="$1" selected_version="$2" current_version="$3" target_existed="$4" config_snapshot="$5"
+    local selected_path="$1" selected_version="$2" current_version="$3" target_existed="$4" config_snapshot="$5" config_paired="$6"
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err "${DB_YELLOW}                       BACKUP RESTORE CONFIRMATION                     ${NC}"
@@ -869,13 +937,17 @@ print_restore_warning() {
     echo_err "  will be restored after a successful operation."
     echo_err
     echo_err "  qBittorrent config : ${LCYAN}$QBT_CONFIG_PATH${NC}"
-    if [[ -n "$config_snapshot" ]]; then
+    if [[ "$config_paired" -eq 1 && -n "$config_snapshot" ]]; then
         echo_err "  Paired config      : ${LGREEN}$config_snapshot${NC}"
         echo_err "  The pre-update config saved with this executable will be restored too."
+    elif [[ -n "$config_snapshot" ]]; then
+        echo_err "  Selected config    : ${LYELLOW}$config_snapshot${NC}"
+        echo_err "  This is a manually selected saved snapshot, not automatically linked"
+        echo_err "  to this executable. Confirm it contains the settings you need."
     else
         echo_err "  Paired config      : ${LYELLOW}Unavailable for this older backup${NC}"
         echo_err "  The current config will be kept as the starting point. If this backup"
-        echo_err "  predates config-aware updates, it cannot recover pre-upgrade settings."
+        echo_err "  predates config-aware updates, it cannot recover unsaved pre-upgrade settings."
     fi
     echo_err "  A separate private snapshot of the current config is saved for rollback."
     echo_err
@@ -1018,6 +1090,12 @@ restore_backup() {
     selected_path="${restore_candidates[$((selected_index - 1))]}"
     selected_version="${restore_versions[$((selected_index - 1))]}"
     CONFIG_RESTORE_FILE="${restore_config_snapshots[$((selected_index - 1))]}"
+    if [[ -n "$CONFIG_RESTORE_FILE" ]]; then
+        CONFIG_RESTORE_PAIRED=1
+    else
+        CONFIG_RESTORE_PAIRED=0
+        select_legacy_config_snapshot
+    fi
     if [[ -x "$BIN_PATH" ]] && current_output="$("$BIN_PATH" --version 2>&1)" && [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
         current_version="${BASH_REMATCH[1]}"
     elif [[ ! -e "$BIN_PATH" ]]; then
@@ -1025,7 +1103,7 @@ restore_backup() {
     fi
     local target_existed=0
     [[ -f "$BIN_PATH" ]] && target_existed=1
-    print_restore_warning "$selected_path" "$selected_version" "$current_version" "$target_existed" "$CONFIG_RESTORE_FILE"
+    print_restore_warning "$selected_path" "$selected_version" "$current_version" "$target_existed" "$CONFIG_RESTORE_FILE" "$CONFIG_RESTORE_PAIRED"
     if ! confirm_action "Restore qBittorrent $selected_version from this backup?"; then
         echo_err "\n${MSG_WY}Restore cancelled. The installed executable and service were not changed.${NC}"
         return 0
@@ -1082,7 +1160,11 @@ restore_backup() {
             echo_err "${MSG_WR}Could not apply the configuration snapshot paired with the selected executable. Automatic rollback will be attempted.${NC}"
             exit 1
         fi
-        echo_err "${MSG_IG}Applied the matching pre-update configuration snapshot: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+        if [[ "$CONFIG_RESTORE_PAIRED" -eq 1 ]]; then
+            echo_err "${MSG_IG}Applied the matching pre-update config snapshot: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+        else
+            echo_err "${MSG_IG}Applied the manually selected saved config snapshot: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+        fi
     else
         CONFIG_RESTORE_FILE="$CONFIG_BACKUP_FILE"
         echo_err "${MSG_WY}This legacy executable backup has no paired pre-update config. The current configuration will be used; any settings already lost or reset cannot be reconstructed from this backup.${NC}"
