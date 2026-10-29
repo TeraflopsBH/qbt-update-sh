@@ -125,6 +125,59 @@ check_internet() {
     echo_err "${DB_GREEN} PRESENT ${NC}"
 }
 
+ensure_jq() {
+    if command -v jq >/dev/null 2>&1; then
+        echo_err "${MSG_IG}JSON parser ${LBLUE}jq${NC} is already installed.${NC}"
+        return 0
+    fi
+
+    echo_err "\n${MSG_WY}The required JSON parser 'jq' is missing. This updater will install it using APT.${NC}"
+    if ! command -v apt-get >/dev/null 2>&1; then
+        echo_err "${MSG_WR}Cannot install jq automatically: apt-get is unavailable. Install jq and rerun the updater.${NC}"
+        exit 1
+    fi
+
+    echo_n_err "${MSG_IG}Refreshing package lists before installing jq... ${NC}"
+    if ! apt-get update; then
+        echo_err "${DB_RED} FAILED ${NC}"
+        echo_err "${MSG_WR}APT package-list refresh failed. Install jq manually and rerun the updater.${NC}"
+        exit 1
+    fi
+    echo_err "${DB_GREEN} DONE ${NC}"
+
+    echo_n_err "${MSG_IG}Installing required dependency ${LBLUE}jq${NC}... ${NC}"
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y jq; then
+        echo_err "${DB_RED} FAILED ${NC}"
+        echo_err "${MSG_WR}Could not install jq. Install it manually with: apt-get install jq${NC}"
+        exit 1
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        echo_err "${MSG_WR}APT reported success, but jq is still unavailable. Aborting.${NC}"
+        exit 1
+    fi
+    echo_err "${DB_GREEN} DONE ${NC}"
+}
+
+print_update_warning() {
+    echo_err
+    echo_err "${DB_YELLOW}                 IMPORTANT UPDATE WARNING                 ${NC}"
+    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
+    echo_err "This updater downloads a third-party static qBittorrent binary"
+    echo_err "from userdocs/qbittorrent-nox-static on GitHub."
+    echo_err
+    echo_err "${LYELLOW}What it will do:${NC}"
+    echo_err "  - Replace ${LBLUE}$BIN_PATH${NC} (the DietPi-installed executable)."
+    echo_err "  - Stop and restart ${LBLUE}$QBT_SERVICE${NC} during replacement."
+    echo_err "  - Create a timestamped backup and attempt automatic rollback"
+    echo_err "    if replacement or service startup fails."
+    echo_err
+    echo_err "${LYELLOW}What you should know:${NC}"
+    echo_err "  - This is not the standard Debian/DietPi packaged binary."
+    echo_err "  - Rollback is best-effort; keep a known-good backup."
+    echo_err "  - qBittorrent configuration is not intentionally modified."
+    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
+}
+
 print_logo() {
     clear >&2
     cat << "EOF" >&2
@@ -358,6 +411,9 @@ main() {
         exit 1
     fi
 
+    # jq is installed automatically if it is not already present.
+    ensure_jq
+
     # Check the executable and service unit independently.
     echo_n_err "\n        ${GREEN}- Detecting qBitTorrent installation...                    ${NC}"
     local binary_exists=0 unit_exists=0
@@ -381,7 +437,7 @@ main() {
         exit 1
     fi
     local required_tool
-    for required_tool in curl jq file grep head systemctl; do
+    for required_tool in curl file grep head systemctl; do
         if ! command -v "$required_tool" >/dev/null 2>&1; then echo_err "${MSG_WR}Required command '$required_tool' is missing. Install it before running this updater.${NC}"; exit 1; fi
     done
     local service_execstart
@@ -418,9 +474,12 @@ main() {
     fi
     echo_err "          ${YELLOW}---------------------------------------"
 
+    # Explain the replacement and its recovery implications before asking for consent.
+    print_update_warning
+
     # Prompt to proceed
     while true; do
-        echo_n_err "\n${MSG_WY}Do you want proceed with this script (${GREEN}y${YELLOW}/${RED}n${YELLOW}): ${NC}"
+        echo_n_err "\n${MSG_WY}Do you understand the warning and want to continue (${GREEN}y${YELLOW}/${RED}n${YELLOW}): ${NC}"
         local continuerun
         read -r continuerun < /dev/tty || continuerun="n"
         if [[ $continuerun =~ ^[Yy]$ ]]; then
