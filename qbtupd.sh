@@ -63,6 +63,7 @@ BACKUP_FILE=""
 STAGED_PATH=""
 QBT_CONFIG_PATH=""
 CONFIG_BACKUP_FILE=""
+CONFIG_RESTORE_FILE=""
 UPDATE_IN_PROGRESS=0
 SERVICE_WAS_ACTIVE=0
 TARGET_MISSING_BEFORE=0
@@ -493,14 +494,16 @@ manage_backups() {
         2) 
             echo_n_err "\n${MSG_IG}Cleaning up old backups.............                        ${NC}"
             for ((i=1; i<${#backups[@]}; i++)); do
-                rm -f "${backups[$i]}"
+                rm -f -- "${backups[$i]}"
+                remove_config_snapshot_for_binary "${backups[$i]}"
             done
             echo_err "${DB_GREEN}  DONE  ${NC}"
             ;;
         3)
             echo_n_err "\n${MSG_IG}Deleting all previous backups (current backup retained).... ${NC}"
             for b in "${backups[@]}"; do
-                rm -f "$b"
+                rm -f -- "$b"
+                remove_config_snapshot_for_binary "$b"
             done
             echo_err "${DB_GREEN}  DONE  ${NC}"
             ;;
@@ -621,7 +624,7 @@ resolve_qbt_config_path() {
 
 save_qbt_config_backup() {
     local source_path="$1"
-    local timestamp destination
+    local snapshot_id="${2:-}" destination
 
     if [[ ! -f "$source_path" || -L "$source_path" || ! -s "$source_path" ]]; then
         echo_err "${MSG_WR}The qBittorrent configuration is missing, empty, or not a regular file: $source_path${NC}"
@@ -632,8 +635,18 @@ save_qbt_config_backup() {
         echo_err "${MSG_WR}Could not create the private configuration-backup directory: $CONFIG_BACKUP_DIR${NC}"
         return 1
     fi
-    timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}_$RANDOM"
-    destination="$CONFIG_BACKUP_DIR/qBittorrent.conf.$timestamp.bak"
+    if [[ -z "$snapshot_id" ]]; then
+        snapshot_id="$(date +'%Y%m%d_%H%M%S')_${BASHPID}_$RANDOM"
+    fi
+    if [[ ! "$snapshot_id" =~ ^[[:alnum:]_-]+$ ]]; then
+        echo_err "${MSG_WR}Invalid configuration snapshot identifier.${NC}"
+        return 1
+    fi
+    destination="$CONFIG_BACKUP_DIR/qBittorrent.conf.$snapshot_id.bak"
+    if [[ -e "$destination" || -L "$destination" ]]; then
+        echo_err "${MSG_WR}A configuration snapshot already exists for identifier '$snapshot_id'; refusing to overwrite it.${NC}"
+        return 1
+    fi
     if ! cp -p -- "$source_path" "$destination"; then
         echo_err "${MSG_WR}Could not back up qBittorrent configuration. No replacement/uninstall will proceed.${NC}"
         return 1
@@ -646,8 +659,32 @@ save_qbt_config_backup() {
     printf '%s\n' "$destination"
 }
 
+# Each updater executable backup is named qbittorrent-nox.<ID>.bak. New updates
+# store the matching pre-update qBittorrent.conf as qBittorrent.conf.<ID>.bak.
+# Older executable backups may not have a paired config snapshot.
+config_snapshot_for_binary() {
+    local binary_backup="$1" config_dir="${2:-$CONFIG_BACKUP_DIR}"
+    local name snapshot_id candidate
+    name="${binary_backup##*/}"
+    [[ "$name" == qbittorrent-nox.*.bak ]] || return 1
+    snapshot_id="${name#qbittorrent-nox.}"
+    snapshot_id="${snapshot_id%.bak}"
+    [[ -n "$snapshot_id" ]] || return 1
+    candidate="$config_dir/qBittorrent.conf.$snapshot_id.bak"
+    [[ -f "$candidate" && ! -L "$candidate" && -s "$candidate" ]] || return 1
+    printf '%s\n' "$candidate"
+}
+
+remove_config_snapshot_for_binary() {
+    local snapshot
+    if snapshot="$(config_snapshot_for_binary "$1")"; then
+        rm -f -- "$snapshot"
+    fi
+}
+
 restore_saved_qbt_config() {
     local post_start_config_backup retries=10
+    local restore_source="${CONFIG_RESTORE_FILE:-$CONFIG_BACKUP_FILE}"
 
     # Preserve the config produced by the restored binary so it can be put back
     # if the pre-restore config is not readable by that binary.
@@ -668,8 +705,12 @@ restore_saved_qbt_config() {
         return 1
     fi
 
-    if ! cp -p -- "$CONFIG_BACKUP_FILE" "$QBT_CONFIG_PATH"; then
-        echo_err "${MSG_WR}Could not copy the pre-restore configuration back into place.${NC}"
+    if [[ -z "$restore_source" || ! -f "$restore_source" || -L "$restore_source" || ! -s "$restore_source" ]]; then
+        echo_err "${MSG_WR}The selected configuration snapshot is unavailable: ${restore_source:-not set}${NC}"
+        return 1
+    fi
+    if ! cp -p -- "$restore_source" "$QBT_CONFIG_PATH"; then
+        echo_err "${MSG_WR}Could not copy the selected configuration snapshot back into place.${NC}"
         systemctl start "$QBT_SERVICE" >/dev/null 2>&1 || true
         return 1
     fi
@@ -682,7 +723,7 @@ restore_saved_qbt_config() {
             retries=$((retries - 1))
         done
         if systemctl is-active --quiet "$QBT_SERVICE"; then
-            echo_err "${MSG_IG}Pre-restore qBittorrent configuration reapplied and service is active.${NC}"
+            echo_err "${MSG_IG}Configuration snapshot reapplied from $restore_source and service is active.${NC}"
             return 0
         fi
     fi
@@ -714,7 +755,7 @@ restore_saved_qbt_config() {
             retries=$((retries - 1))
         done
         if systemctl is-active --quiet "$QBT_SERVICE"; then
-            echo_err "${MSG_WY}Service recovered with its post-start configuration. Pre-restore configuration remains available at: $CONFIG_BACKUP_FILE${NC}"
+            echo_err "${MSG_WY}Service recovered with its post-start configuration. Configuration snapshot remains available at: $restore_source${NC}"
             return 0
         fi
     fi
@@ -805,7 +846,7 @@ get_main_menu_choice() {
 }
 
 print_restore_warning() {
-    local selected_path="$1" selected_version="$2" current_version="$3" target_existed="$4"
+    local selected_path="$1" selected_version="$2" current_version="$3" target_existed="$4" config_snapshot="$5"
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err "${DB_YELLOW}                       BACKUP RESTORE CONFIRMATION                     ${NC}"
@@ -828,8 +869,15 @@ print_restore_warning() {
     echo_err "  will be restored after a successful operation."
     echo_err
     echo_err "  qBittorrent config : ${LCYAN}$QBT_CONFIG_PATH${NC}"
-    echo_err "  A private snapshot of this configuration will be saved before"
-    echo_err "  replacement. If startup rewrites the file, the snapshot is retained."
+    if [[ -n "$config_snapshot" ]]; then
+        echo_err "  Paired config      : ${LGREEN}$config_snapshot${NC}"
+        echo_err "  The pre-update config saved with this executable will be restored too."
+    else
+        echo_err "  Paired config      : ${LYELLOW}Unavailable for this older backup${NC}"
+        echo_err "  The current config will be kept as the starting point. If this backup"
+        echo_err "  predates config-aware updates, it cannot recover pre-upgrade settings."
+    fi
+    echo_err "  A separate private snapshot of the current config is saved for rollback."
     echo_err
     echo_err "  This restores the executable only, not torrent state, downloads or"
     echo_err "  other application data."
@@ -847,8 +895,8 @@ print_restore_warning() {
 restore_backup() {
     local raw_arch detected_arch backup description output version size
     local current_version="UNKNOWN" current_output="" service_execstart
-    local selected_index="" selected_path="" selected_version="" timestamp retries
-    local -a backup_files=() sorted_backups=() restore_candidates=() restore_versions=()
+    local selected_index="" selected_path="" selected_version="" timestamp retries config_snapshot
+    local -a backup_files=() sorted_backups=() restore_candidates=() restore_versions=() restore_config_snapshots=()
 
     if ! require_dietpi_qbt_installed "restore"; then exit 1; fi
     if [[ -L "$BIN_PATH" || ( -e "$BIN_PATH" && ! -f "$BIN_PATH" ) ]]; then
@@ -930,6 +978,11 @@ restore_backup() {
         fi
         restore_candidates+=("$backup")
         restore_versions+=("$version")
+        if config_snapshot="$(config_snapshot_for_binary "$backup")"; then
+            restore_config_snapshots+=("$config_snapshot")
+        else
+            restore_config_snapshots+=("")
+        fi
     done
 
     if (( ${#restore_candidates[@]} == 0 )); then
@@ -942,6 +995,11 @@ restore_backup() {
         size="$(du -h -- "$backup" 2>/dev/null | cut -f1 || true)"
         echo_err "  $((i + 1)). qBittorrent ${LYELLOW}${restore_versions[$i]}${NC}"
         echo_err "     ${LGRAY}$(basename "$backup")  (${size:-size unknown})${NC}"
+        if [[ -n "${restore_config_snapshots[$i]}" ]]; then
+            echo_err "     ${LGREEN}Paired pre-update config snapshot available${NC}"
+        else
+            echo_err "     ${LYELLOW}No paired config snapshot (legacy backup)${NC}"
+        fi
     done
     echo_err
     echo_err "  0. ${LRED}Cancel and return to the shell${NC}"
@@ -959,6 +1017,7 @@ restore_backup() {
 
     selected_path="${restore_candidates[$((selected_index - 1))]}"
     selected_version="${restore_versions[$((selected_index - 1))]}"
+    CONFIG_RESTORE_FILE="${restore_config_snapshots[$((selected_index - 1))]}"
     if [[ -x "$BIN_PATH" ]] && current_output="$("$BIN_PATH" --version 2>&1)" && [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then
         current_version="${BASH_REMATCH[1]}"
     elif [[ ! -e "$BIN_PATH" ]]; then
@@ -966,7 +1025,7 @@ restore_backup() {
     fi
     local target_existed=0
     [[ -f "$BIN_PATH" ]] && target_existed=1
-    print_restore_warning "$selected_path" "$selected_version" "$current_version" "$target_existed"
+    print_restore_warning "$selected_path" "$selected_version" "$current_version" "$target_existed" "$CONFIG_RESTORE_FILE"
     if ! confirm_action "Restore qBittorrent $selected_version from this backup?"; then
         echo_err "\n${MSG_WY}Restore cancelled. The installed executable and service were not changed.${NC}"
         return 0
@@ -1005,7 +1064,17 @@ restore_backup() {
         echo_err "${MSG_WR}Restore aborted because qBittorrent configuration could not be preserved.${NC}"
         exit 1
     fi
-    echo_err "${MSG_IG}Pre-restore configuration snapshot saved: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+    echo_err "${MSG_IG}Pre-restore configuration safety snapshot saved: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+    if [[ -n "$CONFIG_RESTORE_FILE" ]]; then
+        if ! cp -p -- "$CONFIG_RESTORE_FILE" "$QBT_CONFIG_PATH"; then
+            echo_err "${MSG_WR}Could not apply the configuration snapshot paired with the selected executable. Automatic rollback will be attempted.${NC}"
+            exit 1
+        fi
+        echo_err "${MSG_IG}Applied the matching pre-update configuration snapshot: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+    else
+        CONFIG_RESTORE_FILE="$CONFIG_BACKUP_FILE"
+        echo_err "${MSG_WY}This legacy executable backup has no paired pre-update config. The current configuration will be used; any settings already lost or reset cannot be reconstructed from this backup.${NC}"
+    fi
 
     echo_err "\n${MSG_IG}Restoring qBittorrent ${LYELLOW}$selected_version${NC}..."
     if ! mv -f -- "$STAGED_PATH" "$BIN_PATH"; then
@@ -1038,24 +1107,26 @@ restore_backup() {
     echo_err "${DB_GREEN}  DONE  ${NC}"
     echo_err
     echo_err "${MSG_IG}Restore successful: qBittorrent $selected_version is installed.${NC}"
-    if [[ -f "$QBT_CONFIG_PATH" && -f "$CONFIG_BACKUP_FILE" ]]; then
-        if cmp -s -- "$QBT_CONFIG_PATH" "$CONFIG_BACKUP_FILE"; then
-            echo_err "${MSG_IG}qBittorrent configuration remained unchanged during restore.${NC}"
+    if [[ -f "$QBT_CONFIG_PATH" && -f "$CONFIG_RESTORE_FILE" ]]; then
+        if cmp -s -- "$QBT_CONFIG_PATH" "$CONFIG_RESTORE_FILE"; then
+            echo_err "${MSG_IG}Configuration matches the snapshot selected for qBittorrent $selected_version.${NC}"
         elif [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
-            echo_err "${MSG_WY}qBittorrent modified its configuration when the restored binary started.${NC}"
-            if confirm_action "Reapply the pre-restore config and restart qBittorrent to preserve its previous settings?"; then
+            echo_err "${MSG_WY}qBittorrent changed its configuration when the restored binary started.${NC}"
+            if confirm_action "Reapply the configuration snapshot selected for qBittorrent $selected_version and restart the service?"; then
                 if ! restore_saved_qbt_config; then
                     echo_err "${MSG_WR}Configuration recovery failed. The updater will roll back the executable and attempt to restore the previous service state.${NC}"
                     UPDATE_IN_PROGRESS=1
                     exit 1
                 fi
             else
-                echo_err "  Pre-restore config retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
-                echo_err "  If WebUI credentials or port changed, stop the service before manually restoring that file."
+                echo_err "  Selected config retained at: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+                echo_err "  Pre-restore safety copy retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+                echo_err "  If WebUI credentials or ports changed, stop the service before recovering a config."
             fi
         else
-            echo_err "${MSG_WY}The configuration changed, but the service was inactive before restore so it was not started for verification.${NC}"
-            echo_err "  Pre-restore config retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
+            echo_err "${MSG_WY}The configuration differs from the selected snapshot, but the service was inactive before restore so it was not started for verification.${NC}"
+            echo_err "  Selected config retained at: ${LYELLOW}$CONFIG_RESTORE_FILE${NC}"
+            echo_err "  Pre-restore safety copy retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
         fi
     fi
     if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
@@ -1276,6 +1347,14 @@ perform_update() {
         echo_err "${MSG_WR}Existing qBittorrent executable is missing; refusing an unbacked replacement. Repair/install it with DietPi first.${NC}"
         exit 1
     fi
+    if ! QBT_CONFIG_PATH="$(resolve_qbt_config_path)" ||
+       [[ ! -f "$QBT_CONFIG_PATH" || -L "$QBT_CONFIG_PATH" || ! -s "$QBT_CONFIG_PATH" ]]; then
+        rm -f -- "$STAGED_PATH"
+        STAGED_PATH=""
+        echo_err "${MSG_WR}Cannot locate a non-empty qBittorrent configuration. Update aborted because a future executable restore could not be paired with the pre-update settings.${NC}"
+        echo_err "  Check the service user/profile and DietPi's documented config path: /home/qbittorrent/.config/qBittorrent/qBittorrent.conf"
+        exit 1
+    fi
     timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
     if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then
         rm -f "$STAGED_PATH"
@@ -1291,6 +1370,11 @@ perform_update() {
     fi
     UPDATE_IN_PROGRESS=1
     stop_service
+    if ! CONFIG_BACKUP_FILE="$(save_qbt_config_backup "$QBT_CONFIG_PATH" "$timestamp")"; then
+        echo_err "${MSG_WR}Update aborted because the pre-update qBittorrent configuration could not be saved.${NC}"
+        exit 1
+    fi
+    echo_err "${MSG_IG}Pre-update configuration snapshot paired with this executable backup: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
     echo_err "\n${MSG_IG}Atomically replacing the executable... ${NC}"
     if ! mv -f "$STAGED_PATH" "$BIN_PATH"; then
         rm -f "$STAGED_PATH"
