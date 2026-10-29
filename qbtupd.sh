@@ -513,8 +513,9 @@ manage_backups() {
 ################################################################
 
 dietpi_qbt_software_state() {
-    # DietPi's machine-readable software list marks installed software with state 2.
-    local output line software_id software_state
+    # DietPi emits rows such as: "id 46 | =2 | qBittorrent | ...".
+    # State 2 means installed; accept spacing and the optional "=" marker.
+    local output line
     if [[ ! -x "/boot/dietpi/dietpi-software" ]]; then
         printf '%s\n' "unknown"
         return 0
@@ -524,11 +525,13 @@ dietpi_qbt_software_state() {
         return 0
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
-        IFS='|' read -r software_id software_state _ <<< "$line"
-        software_id="${software_id//[[:space:]]/}"
-        software_state="${software_state//[[:space:]]/}"
-        if [[ "$software_id" == "46" && "$software_state" =~ ^[0-9]+$ ]]; then
-            printf '%s\n' "$software_state"
+        if [[ "$line" =~ ^[[:space:]]*id[[:space:]]+46[[:space:]]*\|[[:space:]]*=?([0-9]+)[[:space:]]*\| ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
+            return 0
+        fi
+        # Also accept a plain numeric-ID row, for older/alternate output formats.
+        if [[ "$line" =~ ^[[:space:]]*46[[:space:]]*\|[[:space:]]*=?([0-9]+)[[:space:]]*\| ]]; then
+            printf '%s\n' "${BASH_REMATCH[1]}"
             return 0
         fi
     done <<< "$output"
