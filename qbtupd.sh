@@ -25,7 +25,6 @@ readonly VERSION_JSON_URL="https://github.com/userdocs/qbittorrent-nox-static/re
 ################################################################
 
 # Standard Colors
-readonly RED='\033[0;91m'
 readonly LRED='\033[1;31m'
 readonly GREEN='\033[0;92m'
 readonly LGREEN='\033[1;32m'
@@ -146,7 +145,7 @@ check_internet() {
     echo_n_err "\n        ${GREEN}- Checking HTTPS access to GitHub...                      ${NC}"
     if ! curl -fLsS --connect-timeout 10 --max-time 30 "https://github.com/" -o /dev/null; then
         echo_err "${DB_RED} FAILED  ${NC}"
-        echo_err "\n${MSG_WR}Cannot fetch release metadata from GitHub. Check DNS, HTTPS access, and system time.${NC}\n"
+        echo_err "\n${MSG_WR}Cannot reach GitHub over HTTPS. Check DNS, HTTPS access, and system time.${NC}\n"
         exit 1
     fi
     echo_err "${DB_GREEN} PRESENT ${NC}"
