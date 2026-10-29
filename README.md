@@ -18,6 +18,8 @@ On launch, the script verifies root privileges and checks for the DietPi marker.
 
 The menu shows the installed qBittorrent version, service status, DietPi software state, and number of local executable backups. If DietPi cannot verify the software state, restore and uninstall are disabled rather than guessing from leftover files.
 
+All user cancellations return to the main menu without applying the cancelled action. This includes declining install/repair, declining dependency installation, cancelling restore/uninstall confirmations, cancelling update confirmation, and cancelling architecture or libtorrent selection. The only normal way to end the session is to choose Exit. After an operation completes, the main menu is shown again.
+
 ### Update workflow
 
 1. Shows the update safety notice and waits for explicit confirmation.
@@ -100,7 +102,7 @@ sudo bash qbtupd.sh
 
 ## Testing status
 
-The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, and the software-state/config-snapshot/menu-routing unit tests, then tested in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
+The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, and the software-state/config-snapshot/menu-routing checks, including the menu's cancellation return paths, then tested in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
 ## Upstream project
 
