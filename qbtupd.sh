@@ -844,10 +844,43 @@ count_backup_files() {
     printf '%s' "${#files[@]}"
 }
 
+qbt_component_mode() {
+    local binary_exists="$1" unit_exists="$2"
+    if [[ "$binary_exists" == "1" && "$unit_exists" == "1" ]]; then
+        printf '%s\n' "present"
+    elif [[ "$binary_exists" == "0" && "$unit_exists" == "0" ]]; then
+        printf '%s\n' "absent"
+    else
+        printf '%s\n' "inconsistent"
+    fi
+}
+
+dietpi_qbt_install_command() {
+    # If DietPi already marks ID 46 installed but its executable/service is
+    # missing, use DietPi's explicit reinstall operation to repair the setup.
+    if [[ "$1" == "2" ]]; then
+        printf '%s\n' "reinstall"
+    else
+        printf '%s\n' "install"
+    fi
+}
+
+detect_qbt_component_mode() {
+    local binary_exists=0 unit_exists=0
+    [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
+    if command -v systemctl >/dev/null 2>&1 &&
+       systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
+        unit_exists=1
+    fi
+    qbt_component_mode "$binary_exists" "$unit_exists"
+}
+
 get_main_menu_choice() {
     local backup_count current_version="UNKNOWN" current_output="" service_status="Unknown"
     local software_state software_display choice next_choice=2
     local restore_choice=0 uninstall_choice=0 exit_choice
+    local binary_exists=0 unit_exists=0 component_mode
+
     backup_count="$(count_backup_files)"
     software_state="$(dietpi_qbt_software_state)"
     case "$software_state" in
@@ -857,15 +890,19 @@ get_main_menu_choice() {
         *) software_display="Not confirmed installed (state $software_state)" ;;
     esac
 
+    [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then unit_exists=1; fi
+        if systemctl is-active --quiet "$QBT_SERVICE"; then service_status="Active"
+        elif (( unit_exists == 1 )); then service_status="Inactive"
+        else service_status="Unit not found"; fi
+    fi
+    component_mode="$(qbt_component_mode "$binary_exists" "$unit_exists")"
+
     if [[ -x "$BIN_PATH" ]] && current_output="$("$BIN_PATH" --version 2>&1)"; then
         if [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then current_version="${BASH_REMATCH[1]}"; fi
     elif [[ ! -e "$BIN_PATH" ]]; then
         current_version="Not installed"
-    fi
-    if command -v systemctl >/dev/null 2>&1; then
-        if systemctl is-active --quiet "$QBT_SERVICE"; then service_status="Active"
-        elif systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then service_status="Inactive"
-        else service_status="Unit not found"; fi
     fi
 
     echo_err
@@ -879,6 +916,38 @@ get_main_menu_choice() {
     echo_err "  Local backups     : ${LCYAN}$backup_count${NC}"
     echo_err
     echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+
+    # Never offer an update until both the binary and service are present.
+    # For an absent or incomplete installation, offer only DietPi repair/install
+    # and exit. Once the action succeeds, main() returns to this menu.
+    if [[ "$component_mode" != "present" ]]; then
+        if [[ "$component_mode" == "absent" ]]; then
+            echo_err "  qBittorrent executable and service are both missing."
+            if [[ "$software_state" == "2" ]]; then
+                echo_err "  DietPi still marks software ID 46 as installed; choose repair/reinstall."
+                echo_err "  1. ${LYELLOW}Repair qBittorrent through DietPi (reinstall ID 46)${NC}"
+            else
+                echo_err "  1. ${LGREEN}Install qBittorrent through DietPi (software ID 46)${NC}"
+            fi
+        else
+            echo_err "  Only one qBittorrent component is present; updating is disabled."
+            echo_err "  Use DietPi to repair the incomplete installation first."
+            echo_err "  1. ${LYELLOW}Repair qBittorrent through DietPi${NC}"
+        fi
+        echo_err "  2. Exit"
+        echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+        while true; do
+            echo_n_err "\n  ${LYELLOW}Select an action [1-2]: ${NC}"
+            read -r choice < /dev/tty || choice="2"
+            choice="${choice:-2}"
+            case "$choice" in
+                1) echo "install"; return 0 ;;
+                2) echo "exit"; return 0 ;;
+                *) echo_err "${MSG_WY}Invalid selection. Choose 1 or 2.${NC}" ;;
+            esac
+        done
+    fi
+
     echo_err "  1. ${LGREEN}Update qBittorrent${NC}"
 
     if [[ "$software_state" == "2" && "$backup_count" -gt 0 ]]; then
@@ -912,7 +981,6 @@ get_main_menu_choice() {
         echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}"
     done
 }
-
 print_restore_warning() {
     local selected_path="$1" selected_version="$2" current_version="$3" target_existed="$4" config_snapshot="$5" config_paired="$6"
     echo_err
