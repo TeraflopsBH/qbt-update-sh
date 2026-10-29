@@ -18,6 +18,7 @@ set -o pipefail  # Exit if pipe fails
 readonly QBT_SERVICE="qbittorrent.service"
 readonly BIN_PATH="/usr/bin/qbittorrent-nox"
 readonly DIETPI_SERVICES="/boot/dietpi/dietpi-services"
+readonly CONFIG_BACKUP_DIR="/var/backups/qbt-update-sh"
 readonly VERSION_JSON_URL="https://github.com/userdocs/qbittorrent-nox-static/releases/latest/download/dependency-version.json"
 
 ################################################################
@@ -60,6 +61,8 @@ readonly MSG_IG=" ${B_CYAN} INFO ${NC} - ${LGREEN}"
 TMP_DIR=""
 BACKUP_FILE=""
 STAGED_PATH=""
+QBT_CONFIG_PATH=""
+CONFIG_BACKUP_FILE=""
 UPDATE_IN_PROGRESS=0
 SERVICE_WAS_ACTIVE=0
 TARGET_MISSING_BEFORE=0
@@ -83,6 +86,13 @@ cleanup() {
         fi
 
         if [[ "$rollback_ok" -eq 1 ]]; then
+            if [[ -n "${CONFIG_BACKUP_FILE:-}" && -f "$CONFIG_BACKUP_FILE" && -n "${QBT_CONFIG_PATH:-}" ]]; then
+                if cp -p -- "$CONFIG_BACKUP_FILE" "$QBT_CONFIG_PATH"; then
+                    echo_err "${MSG_IG}Pre-operation qBittorrent configuration restored from $CONFIG_BACKUP_FILE.${NC}"
+                else
+                    echo_err "${MSG_WR}Could not restore the pre-operation qBittorrent configuration. Backup remains at: $CONFIG_BACKUP_FILE${NC}"
+                fi
+            fi
             if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
                 systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
                 if systemctl start "$QBT_SERVICE"; then
@@ -171,7 +181,7 @@ ensure_dependencies() {
     local required_command package
     local -a required_commands=(
         file grep head sort du cut basename sleep mktemp
-        cp chmod mv rm date uname
+        cp chmod mv rm mkdir cmp date uname
     )
     if [[ "$mode" == "update" ]]; then required_commands+=(curl jq); fi
     local -a missing_commands=()
@@ -499,6 +509,124 @@ manage_backups() {
 }
 
 ################################################################
+# DIETPI INSTALL STATE AND QBITTORRENT CONFIGURATION
+################################################################
+
+dietpi_qbt_software_state() {
+    # DietPi's machine-readable software list marks installed software with state 2.
+    local output line software_id software_state remainder
+    if [[ ! -x "/boot/dietpi/dietpi-software" ]]; then
+        printf '%s\n' "unknown"
+        return 0
+    fi
+    if ! output="$(/boot/dietpi/dietpi-software list --machine-readable 2>/dev/null)"; then
+        printf '%s\n' "unknown"
+        return 0
+    fi
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        IFS='|' read -r software_id software_state remainder <<< "$line"
+        software_id="${software_id//[[:space:]]/}"
+        software_state="${software_state//[[:space:]]/}"
+        if [[ "$software_id" == "46" && "$software_state" =~ ^[0-9]+$ ]]; then
+            printf '%s\n' "$software_state"
+            return 0
+        fi
+    done <<< "$output"
+    printf '%s\n' "unknown"
+}
+
+require_dietpi_qbt_installed() {
+    local purpose="$1"
+    local state
+    state="$(dietpi_qbt_software_state)"
+    if [[ "$state" == "2" ]]; then return 0; fi
+
+    echo_err
+    if [[ "$state" == "0" || "$state" =~ ^[0-9]+$ ]]; then
+        echo_err "${MSG_WR}DietPi does not report qBittorrent software ID 46 as installed. Refusing to $purpose a backup executable into an incomplete installation.${NC}"
+        echo_err "  Reinstall qBittorrent through DietPi first, then rerun this operation."
+    else
+        echo_err "${MSG_WR}Could not verify the DietPi installation state for qBittorrent software ID 46. Refusing to $purpose until the state can be confirmed.${NC}"
+        echo_err "  Check: /boot/dietpi/dietpi-software list --machine-readable"
+    fi
+    return 1
+}
+
+resolve_qbt_config_path() {
+    local service_user service_home passwd_name passwd_uid passwd_home
+    local service_env service_execstart config_root profile_dir config_name candidate
+
+    service_user="$(systemctl show -p User --value "$QBT_SERVICE" 2>/dev/null || true)"
+    service_user="${service_user:-root}"
+    service_home=""
+    while IFS=: read -r passwd_name _ passwd_uid _ _ passwd_home _; do
+        if [[ "$passwd_name" == "$service_user" || "$passwd_uid" == "$service_user" ]]; then
+            service_home="$passwd_home"
+            break
+        fi
+    done < /etc/passwd
+    [[ -n "$service_home" ]] || return 1
+
+    service_env="$(systemctl show -p Environment --value "$QBT_SERVICE" 2>/dev/null || true)"
+    if [[ "$service_env" =~ (^|[[:space:]])HOME=([^[:space:]]+) ]]; then
+        service_home="${BASH_REMATCH[2]}"
+    fi
+    config_root="$service_home/.config"
+    if [[ "$service_env" =~ (^|[[:space:]])XDG_CONFIG_HOME=([^[:space:]]+) ]]; then
+        config_root="${BASH_REMATCH[2]}"
+    fi
+
+    service_execstart="$(systemctl show -p ExecStart --value "$QBT_SERVICE" 2>/dev/null || true)"
+    if [[ "$service_execstart" =~ --profile=([^[:space:]\;]+) ]]; then
+        profile_dir="${BASH_REMATCH[1]}"
+        [[ "$profile_dir" == /* ]] || profile_dir="$service_home/$profile_dir"
+        for candidate in "$profile_dir/qBittorrent.conf" "$profile_dir/qBittorrent/qBittorrent.conf"; do
+            if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+                printf '%s\n' "$candidate"
+                return 0
+            fi
+        done
+        return 1
+    fi
+    if [[ "$service_execstart" =~ --configuration=([^[:space:]\;]+) ]]; then
+        config_name="${BASH_REMATCH[1]}"
+        candidate="$config_root/qBittorrent_$config_name/qBittorrent.conf"
+    else
+        candidate="$config_root/qBittorrent/qBittorrent.conf"
+    fi
+
+    [[ -f "$candidate" && ! -L "$candidate" ]] || return 1
+    printf '%s\n' "$candidate"
+}
+
+save_qbt_config_backup() {
+    local source_path="$1"
+    local timestamp destination
+
+    if [[ ! -f "$source_path" || -L "$source_path" || ! -s "$source_path" ]]; then
+        echo_err "${MSG_WR}The qBittorrent configuration is missing, empty, or not a regular file: $source_path${NC}"
+        return 1
+    fi
+    umask 077
+    if ! mkdir -p -- "$CONFIG_BACKUP_DIR" || ! chmod 700 -- "$CONFIG_BACKUP_DIR"; then
+        echo_err "${MSG_WR}Could not create the private configuration-backup directory: $CONFIG_BACKUP_DIR${NC}"
+        return 1
+    fi
+    timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"
+    destination="$CONFIG_BACKUP_DIR/qBittorrent.conf.$timestamp.bak"
+    if ! cp -p -- "$source_path" "$destination"; then
+        echo_err "${MSG_WR}Could not back up qBittorrent configuration. No replacement/uninstall will proceed.${NC}"
+        return 1
+    fi
+    if ! chmod 600 -- "$destination"; then
+        rm -f -- "$destination"
+        echo_err "${MSG_WR}Could not secure the configuration backup permissions. Aborting.${NC}"
+        return 1
+    fi
+    printf '%s\n' "$destination"
+}
+
+################################################################
 # MAIN MENU AND LOCAL BACKUP RESTORE
 ################################################################
 
@@ -512,8 +640,16 @@ count_backup_files() {
 
 get_main_menu_choice() {
     local backup_count current_version="UNKNOWN" current_output="" service_status="Unknown"
-    local choice exit_choice
+    local software_state software_display choice next_choice=2
+    local restore_choice=0 uninstall_choice=0 exit_choice
     backup_count="$(count_backup_files)"
+    software_state="$(dietpi_qbt_software_state)"
+    case "$software_state" in
+        2) software_display="Installed (ID 46)" ;;
+        0) software_display="Not installed" ;;
+        unknown) software_display="Unknown — could not verify" ;;
+        *) software_display="Not confirmed installed (state $software_state)" ;;
+    esac
 
     if [[ -x "$BIN_PATH" ]] && current_output="$("$BIN_PATH" --version 2>&1)"; then
         if [[ "$current_output" =~ ([0-9]+\.[0-9]+(\.[0-9]+)?) ]]; then current_version="${BASH_REMATCH[1]}"; fi
@@ -533,32 +669,41 @@ get_main_menu_choice() {
     echo_err
     echo_err "  Installed version : ${LYELLOW}$current_version${NC}"
     echo_err "  Service status    : ${LCYAN}$service_status${NC}"
+    echo_err "  DietPi software   : ${LCYAN}$software_display${NC}"
     echo_err "  Local backups     : ${LCYAN}$backup_count${NC}"
     echo_err
     echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
     echo_err "  1. ${LGREEN}Update qBittorrent${NC}"
-    if (( backup_count > 0 )); then
-        echo_err "  2. ${LYELLOW}Restore a previous backup${NC}"
-        exit_choice=3
-    else
-        echo_err "  No updater backups detected; restore is unavailable."
-        exit_choice=2
+
+    if [[ "$software_state" == "2" && "$backup_count" -gt 0 ]]; then
+        restore_choice=$next_choice
+        echo_err "  $restore_choice. ${LYELLOW}Restore a previous backup${NC}"
+        next_choice=$((next_choice + 1))
+    elif (( backup_count > 0 )); then
+        echo_err "  ${LGRAY}Backup files exist, but restore is disabled because DietPi does not confirm qBittorrent is installed.${NC}"
     fi
-    echo_err "  $exit_choice. ${LRED}Exit${NC}"
+
+    if [[ "$software_state" == "2" ]]; then
+        uninstall_choice=$next_choice
+        echo_err "  $uninstall_choice. ${LRED}Uninstall qBittorrent through DietPi${NC}"
+        next_choice=$((next_choice + 1))
+    fi
+
+    exit_choice=$next_choice
+    echo_err "  $exit_choice. Exit"
     echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+
     while true; do
         echo_n_err "\n  ${LYELLOW}Select an action [1-$exit_choice]: ${NC}"
         read -r choice < /dev/tty || choice="$exit_choice"
         choice="${choice:-$exit_choice}"
-        case "$choice" in
-            1) echo "update"; return 0 ;;
-            2) if (( backup_count > 0 )); then echo "restore"; else echo "exit"; fi; return 0 ;;
-            3)
-                if (( backup_count > 0 )); then echo "exit"; return 0; fi
-                echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}"
-                ;;
-            *) echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}" ;;
-        esac
+        if [[ "$choice" =~ ^[0-9]+$ ]]; then
+            if (( choice == 1 )); then echo "update"; return 0; fi
+            if (( restore_choice > 0 && choice == restore_choice )); then echo "restore"; return 0; fi
+            if (( uninstall_choice > 0 && choice == uninstall_choice )); then echo "uninstall"; return 0; fi
+            if (( choice == exit_choice )); then echo "exit"; return 0; fi
+        fi
+        echo_err "${MSG_WY}Invalid selection. Choose a listed option.${NC}"
     done
 }
 
