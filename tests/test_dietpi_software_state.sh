@@ -47,10 +47,10 @@ printf 'PASS: legacy executable backup without config snapshot is detected\n'
 assert_value() {
     local description="$1" actual="$2" expected="$3"
     if [[ "$actual" != "$expected" ]]; then
-        printf 'FAIL: %s: expected <%s>, got <%s>\\n' "$description" "$expected" "$actual" >&2
+        printf 'FAIL: %s: expected <%s>, got <%s>\n' "$description" "$expected" "$actual" >&2
         exit 1
     fi
-    printf 'PASS: %s\\n' "$description"
+    printf 'PASS: %s\n' "$description"
 }
 
 assert_value "both qBittorrent components absent routes to install menu" "$(qbt_component_mode 0 0)" "absent"
