@@ -114,6 +114,24 @@ echo_n_err() {
     echo -ne "$@" >&2
 }
 
+confirm_action() {
+    local prompt="$1"
+    local answer
+
+    while true; do
+        echo_n_err "\n  ${LYELLOW}${prompt} [y/N]: ${NC}"
+        if ! IFS= read -r answer < /dev/tty; then
+            answer=""
+        fi
+
+        case "$answer" in
+            y|Y|yes|YES|Yes) return 0 ;;
+            ""|n|N|no|NO|No) return 1 ;;
+            *) echo_err "${MSG_WY}Please enter y or n. The default is No.${NC}" ;;
+        esac
+    done
+}
+
 check_root() {
     echo_n_err "\n        ${GREEN}- Checking for ${LBLUE}SUDO${GREEN}...                                     "
     if [[ $EUID -ne 0 ]]; then
@@ -135,27 +153,29 @@ check_internet() {
 }
 
 ensure_dependencies() {
-    # The script is intended for DietPi/Debian and runs as root. Install only
-    # packages that provide commands actually missing from this system.
+    # Check all external helper commands before using curl, jq, or file.
+    # APT and systemctl are prerequisites for bootstrapping/system management.
     local required_command package
     local -a required_commands=(
         curl jq file grep head sort du cut basename sleep mktemp
         cp chmod mv rm date uname
     )
+    local -a missing_commands=()
     local -a missing_packages=()
 
     if ! command -v apt-get >/dev/null 2>&1; then
         echo_err "${MSG_WR}Cannot install missing dependencies automatically: apt-get is unavailable.${NC}"
-        echo_err "          This updater requires a DietPi/Debian system with APT available.${NC}"
+        echo_err "  This updater requires a DietPi/Debian system with APT available."
         exit 1
     fi
     if ! command -v systemctl >/dev/null 2>&1; then
-        echo_err "${MSG_WR}systemctl is unavailable. This system does not appear to have the expected systemd service manager.${NC}"
+        echo_err "${MSG_WR}systemctl is unavailable. The expected systemd service manager was not found.${NC}"
         exit 1
     fi
 
     for required_command in "${required_commands[@]}"; do
         if ! command -v "$required_command" >/dev/null 2>&1; then
+            missing_commands+=("$required_command")
             case "$required_command" in
                 curl) package="curl" ;;
                 jq) package="jq" ;;
@@ -172,33 +192,58 @@ ensure_dependencies() {
     done
 
     if [[ ${#missing_packages[@]} -eq 0 ]]; then
-        echo_err "${MSG_IG}All required external commands are available.${NC}"
+        echo_err
+        echo_err "${MSG_IG}All required helper commands are available.${NC}"
+        echo_err
         return 0
     fi
 
     echo_err
-    echo_err "${DB_YELLOW}              MISSING DEPENDENCIES WARNING              ${NC}"
-    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
-    echo_err "The following package(s) are missing: ${LYELLOW}${missing_packages[*]}${NC}"
-    echo_err "The updater will install them using APT before continuing."
-    echo_err "No qBittorrent executable will be replaced during this step."
-    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_YELLOW}                    DEPENDENCY INSTALLATION                    ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  The updater cannot continue until the following commands are available:"
+    echo_err
+    for required_command in "${missing_commands[@]}"; do
+        echo_err "      - $required_command"
+    done
+    echo_err
+    echo_err "  APT packages to be installed:"
+    for package in "${missing_packages[@]}"; do
+        echo_err "      - $package"
+    done
+    echo_err
+    echo_err "  If you approve, the script will run:"
+    echo_err "      apt-get update"
+    echo_err "      apt-get install --no-install-recommends --no-upgrade ..."
+    echo_err
+    echo_err "  No qBittorrent executable will be replaced during this step."
+    echo_err "  If you decline, the updater will exit without installing anything."
+    echo_err
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
 
-    echo_n_err "${MSG_IG}Refreshing APT package lists... ${NC}"
+    if ! confirm_action "Install the missing helper packages now using APT?"; then
+        echo_err
+        echo_err "${MSG_WY}Dependency installation declined. Nothing has been installed by this updater.${NC}"
+        exit 0
+    fi
+
+    echo_err
+    echo_err "${MSG_IG}Refreshing APT package lists...${NC}"
     if ! apt-get update; then
-        echo_err "${DB_RED} FAILED ${NC}"
-        echo_err "${MSG_WR}APT update failed. Check network/repository configuration, then rerun the updater.${NC}"
+        echo_err
+        echo_err "${MSG_WR}APT update failed. Check network and repository configuration, then rerun the updater.${NC}"
         exit 1
     fi
-    echo_err "${DB_GREEN} DONE ${NC}"
 
-    echo_n_err "${MSG_IG}Installing missing package(s): ${LYELLOW}${missing_packages[*]}${NC}... "
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${missing_packages[@]}"; then
-        echo_err "${DB_RED} FAILED ${NC}"
+    echo_err
+    echo_err "${MSG_IG}Installing approved package(s): ${LYELLOW}${missing_packages[*]}${NC}"
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --no-upgrade "${missing_packages[@]}"; then
+        echo_err
         echo_err "${MSG_WR}Dependency installation failed. Fix APT and rerun the updater.${NC}"
         exit 1
     fi
-    echo_err "${DB_GREEN} DONE ${NC}"
 
     for required_command in "${required_commands[@]}"; do
         if ! command -v "$required_command" >/dev/null 2>&1; then
@@ -206,47 +251,72 @@ ensure_dependencies() {
             exit 1
         fi
     done
-    echo_err "${MSG_IG}Dependency verification completed.${NC}"
+
+    echo_err
+    echo_err "${MSG_IG}Dependency installation and verification completed.${NC}"
+    echo_err
 }
 
 print_startup_warning() {
     echo_err
-    echo_err "${DB_YELLOW}                 IMPORTANT SAFETY NOTICE                 ${NC}"
-    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
-    echo_err "This updater is intended for DietPi and is a work in progress."
-    echo_err "It downloads a third-party static qBittorrent executable from"
-    echo_err "userdocs/qbittorrent-nox-static on GitHub."
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_YELLOW}                 QBITTORRENT UPDATER FOR DIETPI                 ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
     echo_err
-    echo_err "${LYELLOW}During this run, it may:${NC}"
-    echo_err "  - Install missing helper packages using APT."
-    echo_err "  - Offer to install qBittorrent through DietPi if it is absent."
-    echo_err "  - Replace ${LBLUE}$BIN_PATH${NC} and start ${LBLUE}$QBT_SERVICE${NC}."
-    echo_err "  - Create a timestamped backup and attempt rollback on failure."
+    echo_err "  This script replaces DietPi's qBittorrent executable with a static"
+    echo_err "  build downloaded from userdocs/qbittorrent-nox-static on GitHub."
     echo_err
-    echo_err "${LYELLOW}Important:${NC}"
-    echo_err "  - The executable is not the standard Debian/DietPi package build."
-    echo_err "  - Rollback is best-effort; keep a known-good backup."
-    echo_err "  - The script does not intentionally modify qBittorrent settings."
-    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
+    echo_err "  During this session, the updater may:"
+    echo_err "      - Ask permission to install missing helper packages through APT."
+    echo_err "      - Ask permission to install qBittorrent through DietPi, if absent."
+    echo_err "      - Download and validate a replacement executable."
+    echo_err "      - Back up the current executable, then restart the service."
+    echo_err
+    echo_err "  Safety measures:"
+    echo_err "      - The candidate is validated before the installed binary is changed."
+    echo_err "      - A timestamped backup is retained for recovery."
+    echo_err "      - Rollback is attempted if replacement or service startup fails."
+    echo_err "      - qBittorrent settings are not intentionally modified."
+    echo_err
+    echo_err "  This is a work-in-progress updater using a third-party binary."
+    echo_err "  Rollback is best-effort; keep a separate, known-good backup."
+    echo_err
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
 }
-
 print_update_warning() {
-    echo_err
-    echo_err "${DB_YELLOW}                 BEFORE YOU CONTINUE                 ${NC}"
-    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
-    echo_err "You are about to replace the qBittorrent executable at:"
-    echo_err "  ${LBLUE}$BIN_PATH${NC}"
-    echo_err "The selected third-party binary will be downloaded and validated"
-    echo_err "before the installed executable is touched."
-    echo_err "The script will back up the existing binary, stop the service,"
-    echo_err "replace the executable, and attempt to start the service."
-    echo_err "If replacement or startup fails, automatic rollback is attempted."
-    echo_err
-    echo_err "${LYELLOW}Do not proceed on a production system without a separate backup.${NC}"
-    echo_err "Rollback is best-effort and cannot repair unrelated service/config errors."
-    echo_err "${YELLOW}-----------------------------------------------------------${NC}"
-}
+    local current_version="$1"
+    local latest_version="$2"
+    local selected_arch="$3"
+    local selected_libtorrent="$4"
 
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_YELLOW}                       FINAL UPDATE CONFIRMATION                       ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  Current qBittorrent version : ${LYELLOW}${current_version}${NC}"
+    echo_err "  Latest qBittorrent version  : ${LGREEN}${latest_version}${NC}"
+    echo_err "  Selected architecture       : ${LCYAN}${selected_arch}${NC}"
+    echo_err "  Selected libtorrent         : ${LCYAN}${selected_libtorrent}${NC}"
+    echo_err
+    echo_err "  Target executable:"
+    echo_err "      ${LBLUE}$BIN_PATH${NC}"
+    echo_err
+    echo_err "  If you continue, the updater will:"
+    echo_err "      1. Download the selected third-party binary."
+    echo_err "      2. Validate its file type, architecture, and reported version."
+    echo_err "      3. Create a timestamped backup of the current executable."
+    echo_err "      4. Stop the service, replace the binary, and start the service."
+    echo_err
+    echo_err "  If replacement or startup fails, the updater will try to restore"
+    echo_err "  the previous binary and restore the service's prior running state."
+    echo_err
+    echo_err "  No binary replacement or service stop occurs before validation."
+    echo_err "  Rollback cannot fix unrelated service or configuration problems."
+    echo_err
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+    echo_err
+}
 print_logo() {
     if command -v clear >/dev/null 2>&1; then
         clear >&2 || true
@@ -330,7 +400,7 @@ get_architecture_interactive() {
     done
 
     echo_err "\n${MSG_IG}Selected artifact architecture: ${DB_MAGENTA}$selected_arch${NC}"
-    echo_err "${MSG_WY}A non-native selection will fail validation unless the host can execute that architecture.${NC}\n"
+    echo_err "  The downloaded executable must pass its self-test on this host.\n"
     echo "$selected_arch"
 }
 
@@ -566,8 +636,12 @@ main() {
     fi
 
     print_startup_warning
+    if ! confirm_action "Continue to the preflight checks?"; then
+        echo_err "\n${MSG_WY}Cancelled. No changes have been made.${NC}\n"
+        exit 0
+    fi
 
-    # Install all missing helper tools before using curl, jq, or file.
+    # Ask before installing any helper packages.
     ensure_dependencies
     check_internet
 
@@ -580,11 +654,14 @@ main() {
         echo_err "${DB_GREEN} PRESENT ${NC}"
     elif (( binary_exists == 0 && unit_exists == 0 )); then
         echo_err "${DB_RED} ABSENT  ${NC}\n"
-        echo_n_err "${MSG_IG}Would you like to install it: (y/n):${NC} "
-        local install_qbt
-        read -r install_qbt < /dev/tty || install_qbt="n"
-        if [[ $install_qbt =~ ^[Yy]$ ]]; then
-            echo_err "${MSG_IG}Installing ${LBLUE}qBitTorrent${NC} ${GREEN}software via DietPi...${NC}"
+        echo_err
+        echo_err "  qBittorrent was not detected on this DietPi installation."
+        echo_err "  The DietPi software installer will install package/software ID 46."
+        echo_err "  This is a separate action from installing the updater's helper tools."
+        echo_err
+        if confirm_action "Install qBittorrent through DietPi now?"; then
+            echo_err
+            echo_err "${MSG_IG}Installing ${LBLUE}qBittorrent${NC} ${GREEN}through DietPi...${NC}"
             if ! /boot/dietpi/dietpi-software install 46; then
                 echo_err "\n${MSG_WR}DietPi qBittorrent installation command failed. No updater changes have been made to the binary.${NC}"
                 exit 1
@@ -593,7 +670,10 @@ main() {
                 echo_err "\n${MSG_WR}Installation returned, but the expected executable or service unit is missing.${NC}"
                 exit 1
             fi
-        else echo_err "\n${MSG_WY}OK. Script will now abort.${NC}\n"; exit 1; fi
+        else
+            echo_err "\n${MSG_WY}qBittorrent installation declined. No update was performed.${NC}\n"
+            exit 0
+        fi
     else
         echo_err "${DB_RED} INCONSISTENT ${NC}\n"
         echo_err "${MSG_WR}Only one expected component (binary or systemd unit) exists. Repair the DietPi installation before updating.${NC}"
@@ -620,37 +700,29 @@ main() {
         [[ -n "$current_ver" ]] || current_ver="UNKNOWN"
     fi
 
-    echo_err "          ${YELLOW}---------------------------------------"
-    echo_err "          ${MSG_IG}Installed Version: ${LYELLOW}${current_ver}${NC}"
-    echo_err "          ${MSG_IG}Latest Available:  ${LGREEN}${latest_ver}${NC}"
-    
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_MAGENTA}                       RELEASE VERSION CHECK                       ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err
+    echo_err "  Installed qBittorrent : ${LYELLOW}${current_ver}${NC}"
+    echo_err "  Latest qBittorrent    : ${LGREEN}${latest_ver}${NC}"
+    echo_err
+
     if [[ "$current_ver" == "$latest_ver" ]]; then
-        echo_err "          ${MSG_IG}Status: qBittorrent version matches the latest release.${NC}"
-        echo_err "          ${MSG_IG}The selected static build may still differ by libtorrent version.${NC}"
+        echo_err "  Status: qBittorrent's version matches the latest release."
+        echo_err "          The static build can still differ by libtorrent version."
     elif [[ "$current_ver" == "UNKNOWN" ]]; then
-        echo_err "          ${MSG_WY}Status: installed version unknown; cannot determine update state.${NC}"
+        echo_err "  ${LYELLOW}Status: the installed version could not be determined.${NC}"
     else
-        echo_err "          ${MSG_IG}Status: installed and latest qBittorrent versions differ.${NC}"
+        echo_err "  Status: the installed and latest versions differ."
     fi
-    echo_err "          ${YELLOW}---------------------------------------"
 
-    # Explain the replacement and its recovery implications before asking for consent.
-    print_update_warning
-
-    # Prompt to proceed
-    while true; do
-        echo_n_err "\n${MSG_WY}Do you understand the warning and want to continue (${GREEN}y${YELLOW}/${RED}n${YELLOW}): ${NC}"
-        local continuerun
-        read -r continuerun < /dev/tty || continuerun="n"
-        if [[ $continuerun =~ ^[Yy]$ ]]; then
-            break
-        elif [[ $continuerun =~ ^[Nn]$ ]]; then
-             echo_err "\n${MSG_WR}You've chosen not to proceed.${NC}    ${DB_RED} Aborting! ${NC}\n"
-             exit 1
-        fi
-    done
-
-    echo_err "\n${MSG_IG}Preparing update workflow...           ${NC}\n"
+    echo_err
+    echo_err "  Next, choose the target architecture and libtorrent version."
+    echo_err "  The updater will ask for final confirmation before downloading"
+    echo_err "  or replacing the installed executable."
+    echo_err
     local arch
     arch="$(get_architecture_interactive)"
     local lib_ver
@@ -663,6 +735,18 @@ main() {
     fi
     if [[ ! "$lib_ver_id" =~ ^[0-9A-Za-z._+-]+$ ]]; then echo_err "${MSG_WR}Unexpected libtorrent version identifier: '$lib_ver_id'. Aborting.${NC}"; exit 1; fi
     local final_url="https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-${latest_ver}_v${lib_ver_id}/${arch}-qbittorrent-nox"
+
+    print_update_warning "$current_ver" "$latest_ver" "$arch" "$lib_ver"
+    if ! confirm_action "Download and install this build now?"; then
+        echo_err "\n${MSG_WY}Update cancelled. The service and installed executable have not been changed.${NC}\n"
+        exit 0
+    fi
+
+    echo_err
+    echo_err "${MSG_IG}Proceeding with the selected build. The service will remain running"
+    echo_err "  during download and validation; it is stopped only for replacement."
+    echo_err
+
     perform_update "$final_url" "$latest_ver" "$arch"
 }
 
