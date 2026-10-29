@@ -72,7 +72,7 @@ sudo bash qbtupd.sh
 ## Recovery notes
 
 - The main menu offers local restore when backup files matching `/usr/bin/qbittorrent-nox.*.bak` exist. Only compatible backups that pass the executable checks are selectable.
-- Restoring an older executable creates a new safety backup of the currently installed executable; if the executable is missing, a failed restore attempts to return the target to that absent state.
+- When an executable is present, restore first creates a safety backup of it. If the executable is missing, a failed restore attempts to return the target to that absent state.
 - Restore retains the chosen source backup and any safety backup. It does not run the backup-cleanup menu.
 - After a successful update, the current update's backup is never removed by the cleanup menu. The options only manage older backups.
 - If the service does not start after an update, inspect logs with `journalctl -u qbittorrent.service`.
