@@ -28,4 +28,4 @@ jobs:
         run: bash -n qbtupd.sh
 
       - name: Run ShellCheck
-        run: shellcheck --severity=error qbtupd.sh
+        run: shellcheck qbtupd.sh
