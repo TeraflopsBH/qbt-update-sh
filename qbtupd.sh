@@ -144,7 +144,7 @@ check_root() {
 
 check_internet() {
     echo_n_err "\n        ${GREEN}- Checking HTTPS access to GitHub...                      ${NC}"
-    if ! curl -fsSL --connect-timeout 10 --max-time 30 "$VERSION_JSON_URL" -o /dev/null; then
+    if ! curl -fLsS --connect-timeout 10 --max-time 30 "https://github.com/" -o /dev/null; then
         echo_err "${DB_RED} FAILED  ${NC}"
         echo_err "\n${MSG_WR}Cannot fetch release metadata from GitHub. Check DNS, HTTPS access, and system time.${NC}\n"
         exit 1
@@ -260,7 +260,7 @@ ensure_dependencies() {
 print_startup_warning() {
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
-    echo_err "${DB_YELLOW}                 QBITTORRENT UPDATER FOR DIETPI                 ${NC}"
+    echo_err "${DB_YELLOW}                    QBITTORRENT UPDATER FOR DIETPI                    ${NC}"
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err
     echo_err "  This script replaces DietPi's qBittorrent executable with a static"
@@ -291,7 +291,7 @@ print_update_warning() {
 
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
-    echo_err "${DB_YELLOW}                       FINAL UPDATE CONFIRMATION                       ${NC}"
+    echo_err "${DB_YELLOW}                      FINAL UPDATE CONFIRMATION                       ${NC}"
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err
     echo_err "  Current qBittorrent version : ${LYELLOW}${current_version}${NC}"
@@ -702,7 +702,7 @@ main() {
 
     echo_err
     echo_err "${YELLOW}======================================================================${NC}"
-    echo_err "${DB_MAGENTA}                       RELEASE VERSION CHECK                       ${NC}"
+    echo_err "${DB_MAGENTA}                         RELEASE VERSION CHECK                         ${NC}"
     echo_err "${YELLOW}======================================================================${NC}"
     echo_err
     echo_err "  Installed qBittorrent : ${LYELLOW}${current_ver}${NC}"
