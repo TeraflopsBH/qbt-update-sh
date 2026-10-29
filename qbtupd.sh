@@ -269,13 +269,13 @@ print_startup_warning() {
     echo_err "      - Ask permission to install missing helper packages through APT."
     echo_err "      - Ask permission to install qBittorrent through DietPi, if absent."
     echo_err "      - Download and validate a replacement executable."
-    echo_err "      - Back up the current executable, then restart the service."
+    echo_err "      - Back up the current executable, then stop and restart the service."
     echo_err
     echo_err "  Safety measures:"
     echo_err "      - The candidate is validated before the installed binary is changed."
     echo_err "      - A timestamped backup is retained for recovery."
     echo_err "      - Rollback is attempted if replacement or service startup fails."
-    echo_err "      - qBittorrent settings are not intentionally modified."
+    echo_err "      - The update itself does not intentionally modify existing settings."
     echo_err
     echo_err "  This is a work-in-progress updater using a third-party binary."
     echo_err "  Rollback is best-effort; keep a separate, known-good backup."
@@ -730,7 +730,7 @@ main() {
 
     print_update_warning "$current_ver" "$latest_ver" "$arch" "$lib_ver"
     if ! confirm_action "Download and install this build now?"; then
-        echo_err "\n${MSG_WY}Update cancelled. The service and installed executable have not been changed.${NC}\n"
+        echo_err "\n${MSG_WY}Update cancelled. The updater did not stop the service or replace the executable.${NC}\n"
         exit 0
     fi
 
