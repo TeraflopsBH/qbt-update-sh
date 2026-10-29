@@ -1718,6 +1718,10 @@ run_update_workflow() {
     perform_update "$final_url" "$latest_ver" "$arch"
 }
 
+dietpi_marker_present() {
+    [[ -f "$DIETPI_SERVICES" ]]
+}
+
 main() {
     print_logo
 
@@ -1728,7 +1732,7 @@ main() {
 
     # Check for DietPi
     echo_n_err "\n        ${GREEN}- Detecting ${LYELLOW}DietPi${NC} ${GREEN}installation...                         ${NC}"
-    if [[ -f "$DIETPI_SERVICES" ]]; then
+    if dietpi_marker_present; then
         echo_err "${DB_GREEN} PRESENT ${NC}"
     else
         echo_err "${DB_RED} ABSENT  ${NC}\n\n       ${LYELLOW}This script is intended for DietPi system.${NC}\n       ${LRED}Script will now abort.${NC}\n"
