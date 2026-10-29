@@ -367,6 +367,7 @@ manage_backups() {
     
     # Expand the backup glob safely; a missing match must not become a literal filename.
     local backup_files=()
+    local line b size i
     shopt -s nullglob
     backup_files=("${BIN_PATH}".*.bak)
     shopt -u nullglob
@@ -384,8 +385,7 @@ manage_backups() {
 
     echo_err "\n${MSG_IG}Detected ${LCYAN}${#backups[@]}${NC} ${GREEN}previous backup file(s):${NC}"
     for b in "${backups[@]}"; do
-        local size
-        size=$(du -h "$b" | cut -f1)
+        if ! size="$(du -h "$b" | cut -f1)"; then size="unknown"; fi
         echo_err "          ${LGRAY}$(basename "$b") ${LYELLOW}($size)"
     done
 
@@ -428,12 +428,16 @@ manage_backups() {
 stop_service() {
     if systemctl is-active --quiet "$QBT_SERVICE"; then
         echo_n_err "${MSG_IG}Stopping ${LBLUE}qbittorrent-nox${NC} ${GREEN}service.....                     ${NC}"
-        systemctl stop "$QBT_SERVICE"
-        
+        if ! systemctl stop "$QBT_SERVICE"; then
+            echo_err "${DB_RED} FAILED  ${NC}"
+            echo_err "${MSG_WR}systemctl could not stop $QBT_SERVICE; the existing executable will be restored if necessary.${NC}"
+            exit 1
+        fi
+
         local retries=10
         while systemctl is-active --quiet "$QBT_SERVICE" && ((retries > 0)); do
             sleep 1
-            ((retries--))
+            retries=$((retries - 1))
         done
 
         if systemctl is-active --quiet "$QBT_SERVICE"; then
@@ -498,7 +502,7 @@ perform_update() {
         echo_err "${MSG_WR}Could not stage executable in /usr/bin. Existing executable was not changed.${NC}"
         exit 1
     fi
-    if [[ ! -x "$BIN_PATH" ]]; then
+    if [[ ! -f "$BIN_PATH" || ! -x "$BIN_PATH" ]]; then
         rm -f "$STAGED_PATH"
         STAGED_PATH=""
         echo_err "${MSG_WR}Existing qBittorrent executable is missing; refusing an unbacked replacement. Repair/install it with DietPi first.${NC}"
@@ -570,7 +574,7 @@ main() {
     # Check the executable and service unit independently.
     echo_n_err "\n        ${GREEN}- Detecting qBitTorrent installation...                    ${NC}"
     local binary_exists=0 unit_exists=0
-    [[ -x "$BIN_PATH" ]] && binary_exists=1
+    [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
     systemctl cat "$QBT_SERVICE" >/dev/null 2>&1 && unit_exists=1
     if (( binary_exists == 1 && unit_exists == 1 )); then
         echo_err "${DB_GREEN} PRESENT ${NC}"
@@ -585,7 +589,7 @@ main() {
                 echo_err "\n${MSG_WR}DietPi qBittorrent installation command failed. No updater changes have been made to the binary.${NC}"
                 exit 1
             fi
-            if ! [[ -x "$BIN_PATH" ]] || ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
+            if ! [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] || ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
                 echo_err "\n${MSG_WR}Installation returned, but the expected executable or service unit is missing.${NC}"
                 exit 1
             fi
