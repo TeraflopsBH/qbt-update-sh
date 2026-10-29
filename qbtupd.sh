@@ -755,7 +755,7 @@ restore_saved_qbt_config() {
     local restore_source="${CONFIG_RESTORE_FILE:-$CONFIG_BACKUP_FILE}"
 
     # Preserve the config produced by the restored binary so it can be put back
-    # if the pre-restore config is not readable by that binary.
+    # if the selected config snapshot is not readable by that binary.
     if ! post_start_config_backup="$(save_qbt_config_backup "$QBT_CONFIG_PATH")"; then
         echo_err "${MSG_WR}Could not preserve the current post-start config. Leaving it untouched.${NC}"
         return 1
@@ -796,7 +796,7 @@ restore_saved_qbt_config() {
         fi
     fi
 
-    echo_err "${MSG_WY}The restored binary did not start with the pre-restore configuration. Reverting to the config it generated at startup...${NC}"
+    echo_err "${MSG_WY}The restored binary did not start with the selected configuration snapshot. Reverting to the config it generated at startup...${NC}"
     if ! systemctl stop "$QBT_SERVICE"; then
         echo_err "${MSG_WR}Could not stop $QBT_SERVICE before reverting its config. Automatic executable rollback will be attempted.${NC}"
         return 1
@@ -951,8 +951,8 @@ print_restore_warning() {
     fi
     echo_err "  A separate private snapshot of the current config is saved for rollback."
     echo_err
-    echo_err "  This restores the executable only, not torrent state, downloads or"
-    echo_err "  other application data."
+    echo_err "  This restores the executable and the selected config snapshot (if any)."
+    echo_err "  It does not restore torrent state, downloads or other application data."
     if [[ "$target_existed" -eq 1 ]]; then
         echo_err "  The selected source backup and new safety backup are retained."
     else
