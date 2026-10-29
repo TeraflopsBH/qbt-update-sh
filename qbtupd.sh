@@ -655,7 +655,7 @@ main() {
             echo_err
             echo_err "${MSG_IG}Installing ${LBLUE}qBittorrent${NC} ${GREEN}through DietPi...${NC}"
             if ! /boot/dietpi/dietpi-software install 46; then
-                echo_err "\n${MSG_WR}DietPi qBittorrent installation command failed. No updater changes have been made to the binary.${NC}"
+                echo_err "\n${MSG_WR}DietPi reported an installation failure. The updater will not attempt a binary replacement. Review the DietPi installer output and repair any partial installation before rerunning.${NC}"
                 exit 1
             fi
             if ! [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] || ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
