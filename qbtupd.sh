@@ -513,7 +513,7 @@ manage_backups() {
 ################################################################
 
 dietpi_qbt_software_state() {
-    # DietPi emits rows such as: "id 46 | =2 | qBittorrent | ...".
+    # DietPi emits rows such as: "ID 46 | =2 | qBittorrent | ...".
     # State 2 means installed; accept spacing and the optional "=" marker.
     local output line
     if [[ ! -x "/boot/dietpi/dietpi-software" ]]; then
