@@ -1,61 +1,67 @@
 # qBitTorrent Updater (`qbt-update-sh`)
 
-## NOTE - `Updated with new functions and option to choose which libtorrent version to use`
+## Overview
 
-## Intro
-Linux BASH script which provides an option to automatically download and update qbittorrent-nox to the latest version available.
-Currently, it is mainly intended for installing and updating already installed qBitTorrent-nox on `DietPi` Linux.
+A Bash updater for `qbittorrent-nox` on DietPi. It downloads the static executable published by [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static), allowing users to install a newer upstream build than may be available from the distribution package.
 
-This script replaces the apt package version of qBitTorrent-nox with a 3rd party executable binary from [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static) GitHub repository, the main reason being that Debian apt package versions are not always up to date.
- 
+**This script replaces the executable installed at `/usr/bin/qbittorrent-nox`. Review the source before running it, and keep a separate backup of important system configuration.** This project is a work in progress.
 
-### The way it works
- 
-The `qbt-update-sh` project is a `bash` script which updates `qbittorrent-nox` installation on `DietPi` using a static `qbittorrent-nox` binary from [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static) GitHub repository.
+## What the updater does
 
-As it requires `ROOT / SUDO` privilege to work as intended, if run as a `non-root` user, it would prompt the user if he wants script to rerun as root and do so if the user agrees. Otherwise, the script would abort.
+1. Requires root privileges and checks that DietPi is present.
+2. Checks that both `/usr/bin/qbittorrent-nox` and `qbittorrent.service` exist. It verifies that the service's `ExecStart` references the expected executable. If only one component exists, it stops and asks you to repair the installation instead of guessing.
+3. Fetches release metadata over HTTPS and validates it as JSON. The script requires the `jq` utility.
+4. Shows the installed and latest qBittorrent versions, then asks whether to continue.
+5. Normalizes common architecture names (including `armv7l` to `armv7`). It only offers the detected architecture or abort; it will not let you choose a binary for a different architecture.
+6. Asks whether to use libtorrent 2.0 or 1.2.
+7. Downloads the selected asset with HTTP error checking and retries. Before touching the installed binary, it checks that the download is non-empty, is an ELF executable for the requested architecture, and can run its `--version` self-test with the expected qBittorrent version.
+8. Stages the candidate on the target filesystem and creates a timestamped backup of the current executable. Only then does it stop the service and atomically replace the executable.
+9. Starts the service and checks that it becomes active. If replacement or startup fails, the script attempts to restore the previous executable and restart the service. If automatic recovery fails, the backup is left in place and its path is reported.
+10. Offers backup cleanup only after the updated service has started successfully.
 
-The script would then try to detect if the system platform is `DietPi` by checking for the existence of specific files.
-If `DietPi` has been detected, the script will proceed further. Otherwise, it would abort.
+The updater does not publish releases, change release assets, or modify the qBittorrent configuration.
 
-Script then checks if `DietPi` version of `qBitTorrent` has already been installed and offers to install it if not, by executing the command: `dietpi-software install 46`.
-If `DietPi` `qBitTorrent` installation was not detected and the user refuses to allow the script to install it, the script would abort.
-Otherwise, it would proceed with installing `qBitTorrent` as described above.
+## Requirements
 
-If `dietpi-software` installation of `qBitTorrent` is present, it would be checked if it is running and stopped if so.
+- DietPi Linux and the expected `qbittorrent.service` systemd unit.
+- Root privileges. When run as a non-root user, the script reports the requirement and exits; it does not automatically re-run itself through `sudo`.
+- Commands: `curl`, `jq`, `file`, `grep`, `head`, `systemctl`, plus standard system utilities available on DietPi.
+- HTTPS access to GitHub.
 
-The updating procedure would start only if all three requirements were met:
+## Usage
 
-  1. System detected as `DietPi`.
-  2. `DietPi` `qBitTorrent` version found or installed.
-  3. `qBitTorrent` service marked as inactive.
+### Option 1: download and run
 
-Script would then try to detect the host system architecture and offer the user to accept the detected architecture by typing `0` and pressing `Enter`, along with a choice to manually choose system architecture by offering the two most used architectures if the user disagrees with the one that is detected.
+Inspect the script first if you do not already trust its source. The following command streams the latest published release directly into Bash and should only be used if you are comfortable executing the remote script as root:
 
-Pressing `Enter` without entering any of the options listed, or choosing the option to `Abort` would abort the script.
+```bash
+curl -fsSL https://github.com/TeraflopsBH/qbt-update-sh/releases/latest/download/qbtupd.sh -o qbtupd.sh
+less qbtupd.sh
+sudo bash qbtupd.sh
+```
 
-As of v1.2, the user is prompted to choose which libtorrent version is desired to be used during installation (current options being `libtorrent 2.0` and `libtorrent 1.2`).
+### Option 2: manual download
 
-For security purposes, the old executable binary is backed up (renamed) with a `.bak` extension.
-Keep in mind that each script rerun will rewrite the backup file. This is about to change in future releases.
+1. Download `qbtupd.sh` from the repository.
+2. Review the contents.
+3. Run it with root privileges:
 
- 
-### How to use
-Option 1 (convenient one-liner):
-  Copy/Paste it to the console and execute (Enter)
-  ```
-  curl -fsSL https://github.com/TeraflopsBH/qbt-update-sh/releases/latest/download/qbtupd.sh | bash
-  ```
+```bash
+sudo bash qbtupd.sh
+```
 
-Option 2 (manual download):
-  1. Download the script file: `qbtupd.sh`
-  2. CHMOD it to enable execution: `chmod u+x qbtupd.sh`
-  3. Execute it: `./qbtupd.sh`
+## Recovery notes
 
+- The existing executable is backed up to a timestamped file matching `/usr/bin/qbittorrent-nox.*.bak`.
+- Keep at least one known-good backup until you have verified qBittorrent is working normally.
+- If the service does not start after an update, inspect logs with `journalctl -u qbittorrent.service`.
+- Automatic rollback is best-effort; it cannot guarantee that a service starts if the underlying configuration or system has another problem.
 
-### Notice
+## Testing status
 
-This `bash` script is in a `work-in-progress` state.
-It was tested on `aarch64` and `x86_64` architectures using `DietPi` optimized `Debian Bullseye` distro, and everything worked as intended.
+The script changes should be checked with `bash -n qbtupd.sh` and ShellCheck, then tested in a disposable DietPi environment before using them on a live installation. In particular, test HTTP failures, malformed metadata, wrong-architecture downloads, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
-I have a plan to improve and expand it further to autodetect if the system running is a non-dietpi (vanilla) Linux installation and make it properly install `qbittorrent-nox` binaries, as per the system architecture detected.
+## Upstream project
+
+- [userdocs/qbittorrent-nox-static](https://github.com/userdocs/qbittorrent-nox-static)
+- [This repository](https://github.com/TeraflopsBH/qbt-update-sh)
