@@ -10,8 +10,8 @@ A Bash updater for `qbittorrent-nox` on DietPi. It downloads the static executab
 
 1. Requires root privileges and checks that DietPi is present.
 2. Checks that both `/usr/bin/qbittorrent-nox` and `qbittorrent.service` exist. It verifies that the service's `ExecStart` references the expected executable. If only one component exists, it stops and asks you to repair the installation instead of guessing.
-3. Fetches release metadata over HTTPS and validates it as JSON. The script requires the `jq` utility.
-4. Shows the installed and latest qBittorrent versions, then asks whether to continue.
+3. Checks required commands and automatically installs `jq` through APT if it is missing (after confirming this is DietPi). It then fetches release metadata over HTTPS and validates it as JSON.
+4. Shows the installed and latest qBittorrent versions, displays an explicit warning explaining the third-party binary replacement, service restart, backup, and best-effort rollback, then asks whether to continue.
 5. Normalizes common architecture names (including `armv7l` to `armv7`). It only offers the detected architecture or abort; it will not let you choose a binary for a different architecture.
 6. Asks whether to use libtorrent 2.0 or 1.2.
 7. Downloads the selected asset with HTTP error checking and retries. Before touching the installed binary, it checks that the download is non-empty, is an ELF executable for the requested architecture, and can run its `--version` self-test with the expected qBittorrent version.
@@ -25,7 +25,7 @@ The updater does not publish releases, change release assets, or modify the qBit
 
 - DietPi Linux and the expected `qbittorrent.service` systemd unit.
 - Root privileges. When run as a non-root user, the script reports the requirement and exits; it does not automatically re-run itself through `sudo`.
-- Commands: `curl`, `jq`, `file`, `grep`, `head`, `systemctl`, plus standard system utilities available on DietPi.
+- Commands: `curl`, `file`, `grep`, `head`, `systemctl`, plus standard system utilities available on DietPi. If `jq` is missing, the script attempts to install it with `apt-get update` and `apt-get install -y jq`.
 - HTTPS access to GitHub.
 
 ## Usage
