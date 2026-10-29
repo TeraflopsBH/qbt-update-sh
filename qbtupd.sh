@@ -44,15 +44,23 @@ readonly B_CYAN='\033[46;37m'
 readonly DB_MAGENTA='\033[45;1;37m'
 readonly DB_YELLOW='\033[43;1;37m'
 
+# Fixed-width status badges (all labels are eight visible characters).
+readonly BADGE_RED='\033[41;37m'
+readonly BADGE_YELLOW='\033[43;30m'
+readonly BADGE_GREEN='\033[42;30m'
+readonly BADGE_CYAN='\033[46;30m'
+
 # Formatting
 readonly NC='\033[0m'
 readonly ULINE='\033[4m'
 readonly BOLD='\033[1m'
 
-# Helpers
-readonly MSG_WR=" ${B_RED} WARN ${NC} - ${LRED}"
-readonly MSG_WY=" ${B_RED} WARN ${NC} - ${LYELLOW}"
-readonly MSG_IG=" ${B_CYAN} INFO ${NC} - ${LGREEN}"
+# Shared status-message prefixes. Badge labels are deliberately fixed-width.
+readonly MSG_WR=" ${BADGE_RED}[ WARN ]${NC} - ${LRED}"
+readonly MSG_WY=" ${BADGE_YELLOW}[ WARN ]${NC} - ${LYELLOW}"
+readonly MSG_IG=" ${BADGE_CYAN}[ INFO ]${NC} - ${LGREEN}"
+readonly MSG_OK=" ${BADGE_GREEN}[  OK  ]${NC} - ${LGREEN}"
+readonly MSG_FAIL=" ${BADGE_RED}[ FAIL ]${NC} - ${LRED}"
 
 ################################################################
 # SYSTEM FUNCTIONS
@@ -138,6 +146,12 @@ echo_n_err() {
     echo -ne "$@" >&2
 }
 
+# Keep one-line status output consistent and avoid detached trailing badges.
+status_info() { echo_err "${MSG_IG}$*${NC}"; }
+status_ok()   { echo_err "${MSG_OK}$*${NC}"; }
+status_warn() { echo_err "${MSG_WY}$*${NC}"; }
+status_fail() { echo_err "${MSG_FAIL}$*${NC}"; }
+
 confirm_action() {
     local prompt="$1"
     local answer
@@ -157,23 +171,21 @@ confirm_action() {
 }
 
 check_root() {
-    echo_n_err "\n        ${GREEN}- Checking for ${LBLUE}SUDO${GREEN}...                                     "
+    status_info "Checking for root privileges..."
     if [[ $EUID -ne 0 ]]; then
-        echo_err "${DB_RED} ABSENT  ${NC}"
-        echo_err "\n${MSG_WY}This script must be run ${ULINE}with ROOT privileges${NC}\n"
+        status_fail "This script must be run with root privileges."
         exit 1
     fi
-    echo_err "${DB_GREEN} PRESENT ${NC}"
+    status_ok "Root privileges confirmed."
 }
 
 check_internet() {
-    echo_n_err "\n        ${GREEN}- Checking HTTPS access to GitHub...                      ${NC}"
+    status_info "Checking HTTPS access to GitHub..."
     if ! curl -fLsS --connect-timeout 10 --max-time 30 "https://github.com/" -o /dev/null; then
-        echo_err "${DB_RED} FAILED  ${NC}"
-        echo_err "\n${MSG_WR}Cannot reach GitHub over HTTPS. Check DNS, HTTPS access, and system time.${NC}\n"
+        status_fail "Cannot reach GitHub over HTTPS. Check DNS, HTTPS access, and system time."
         exit 1
     fi
-    echo_err "${DB_GREEN} PRESENT ${NC}"
+    status_ok "GitHub HTTPS access confirmed."
 }
 
 ensure_dependencies() {
@@ -499,21 +511,21 @@ manage_backups() {
     case "$choice" in
         0) echo_err "\n${MSG_IG}Backup cleanup skipped; all backups were left unchanged.${NC}" ;;
         1) echo_err "\n${MSG_IG}Keeping current and all previous backups.${NC}" ;;
-        2) 
-            echo_n_err "\n${MSG_IG}Cleaning up old backups.............                        ${NC}"
+        2)
+            status_info "Cleaning up old backups..."
             for ((i=1; i<${#backups[@]}; i++)); do
                 rm -f -- "${backups[$i]}"
                 remove_config_snapshot_for_binary "${backups[$i]}"
             done
-            echo_err "${DB_GREEN}  DONE  ${NC}"
+            status_ok "Old backup cleanup completed."
             ;;
         3)
-            echo_n_err "\n${MSG_IG}Deleting all previous backups (current backup retained).... ${NC}"
+            status_info "Deleting previous backups while retaining the current backup..."
             for b in "${backups[@]}"; do
                 rm -f -- "$b"
                 remove_config_snapshot_for_binary "$b"
             done
-            echo_err "${DB_GREEN}  DONE  ${NC}"
+            status_ok "Previous backup cleanup completed."
             ;;
         *) echo_err "${MSG_WY}Invalid choice. Keeping all.${NC}" ;;
     esac
@@ -1295,18 +1307,16 @@ restore_backup() {
     STAGED_PATH=""
 
     if [[ "$SERVICE_WAS_ACTIVE" -eq 1 ]]; then
-        echo_n_err "${MSG_IG}Starting and verifying $QBT_SERVICE after restore... ${NC}"
+        status_info "Starting and verifying $QBT_SERVICE after restore..."
         systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
         if ! systemctl start "$QBT_SERVICE"; then
-            echo_err "${DB_RED} FAILED ${NC}"
-            echo_err "${MSG_WR}Service start failed; automatic rollback will be attempted.${NC}"
+            status_fail "Service start failed; automatic rollback will be attempted."
             exit 1
         fi
         retries=10
         while (( retries > 0 )); do systemctl is-active --quiet "$QBT_SERVICE" && break; sleep 1; retries=$((retries - 1)); done
         if ! systemctl is-active --quiet "$QBT_SERVICE"; then
-            echo_err "${DB_RED} FAILED ${NC}"
-            echo_err "${MSG_WR}Service did not become active; automatic rollback will be attempted. Inspect journalctl -u $QBT_SERVICE.${NC}"
+            status_fail "Service did not become active; automatic rollback will be attempted. Inspect journalctl -u $QBT_SERVICE."
             exit 1
         fi
     else
@@ -1315,9 +1325,8 @@ restore_backup() {
     fi
 
     UPDATE_IN_PROGRESS=0
-    echo_err "${DB_GREEN}  DONE  ${NC}"
     echo_err
-    echo_err "${MSG_IG}Restore successful: qBittorrent $selected_version is installed.${NC}"
+    status_ok "Restore successful: qBittorrent $selected_version is installed."
     if [[ -f "$QBT_CONFIG_PATH" && -f "$CONFIG_RESTORE_FILE" ]]; then
         if cmp -s -- "$QBT_CONFIG_PATH" "$CONFIG_RESTORE_FILE"; then
             echo_err "${MSG_IG}Configuration matches the snapshot selected for qBittorrent $selected_version.${NC}"
@@ -1462,8 +1471,7 @@ uninstall_qbittorrent() {
     fi
 
     echo_err
-    echo_err "${DB_GREEN}  DONE  ${NC}"
-    echo_err "${MSG_IG}DietPi qBittorrent uninstall completed.${NC}"
+    status_ok "DietPi qBittorrent uninstall completed."
     if [[ -n "$CONFIG_BACKUP_FILE" ]]; then
         echo_err "${MSG_IG}Configuration backup retained at: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
     fi
@@ -1477,10 +1485,9 @@ uninstall_qbittorrent() {
 
 stop_service() {
     if systemctl is-active --quiet "$QBT_SERVICE"; then
-        echo_n_err "${MSG_IG}Stopping ${LBLUE}qbittorrent-nox${NC} ${GREEN}service.....                     ${NC}"
+        status_info "Stopping $QBT_SERVICE..."
         if ! systemctl stop "$QBT_SERVICE"; then
-            echo_err "${DB_RED} FAILED  ${NC}"
-            echo_err "${MSG_WR}systemctl could not stop $QBT_SERVICE; the existing executable will be restored if necessary.${NC}"
+            status_fail "systemctl could not stop $QBT_SERVICE; the existing executable will be restored if necessary."
             exit 1
         fi
 
@@ -1491,10 +1498,10 @@ stop_service() {
         done
 
         if systemctl is-active --quiet "$QBT_SERVICE"; then
-            echo_err "${DB_RED} FAILED  ${NC}"
+            status_fail "$QBT_SERVICE did not stop within the expected time."
             exit 1
         else
-             echo_err "${DB_GREEN}  DONE  ${NC}"
+            status_ok "$QBT_SERVICE stopped."
         fi
     fi
 }
@@ -1513,10 +1520,11 @@ fetch_release_data() {
 perform_update() {
     local url="$1" expected_version="$2" expected_arch="$3"
     local download_path candidate_version candidate_version_number expected_version_number file_description timestamp retries
-    echo_n_err "${MSG_IG}Making temporary download directory....................     ${NC}"
+    status_info "Creating temporary download directory..."
     TMP_DIR="$(mktemp -d)"; download_path="$TMP_DIR/qbittorrent-nox"
-    echo_err "${DB_GREEN}  DONE  ${NC}"
-    echo_err "\n${MSG_IG}Downloading and validating the candidate binary... ${NC}"
+    status_ok "Temporary download directory created."
+    echo_err
+    status_info "Downloading and validating the candidate binary..."
     if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 600 --progress-bar "$url" -o "$download_path"; then
         echo_err "\n${MSG_WR}Download failed (HTTP error, timeout, or network failure). Existing executable was not changed.${NC}"; exit 1
     fi
@@ -1594,15 +1602,21 @@ perform_update() {
         exit 1
     fi
     STAGED_PATH=""
-    echo_n_err "${MSG_IG}Starting ${LBLUE}qbittorrent-nox${NC} ${GREEN}service... ${NC}"
+    status_info "Starting and verifying $QBT_SERVICE..."
     systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
-    if ! systemctl start "$QBT_SERVICE"; then echo_err "${DB_RED} FAILED ${NC}"; echo_err "${MSG_WR}Service start failed; rollback will be attempted.${NC}"; exit 1; fi
+    if ! systemctl start "$QBT_SERVICE"; then
+        status_fail "Service start failed; rollback will be attempted."
+        exit 1
+    fi
     retries=10
     while (( retries > 0 )); do systemctl is-active --quiet "$QBT_SERVICE" && break; sleep 1; retries=$((retries - 1)); done
-    if ! systemctl is-active --quiet "$QBT_SERVICE"; then echo_err "${DB_RED} FAILED ${NC}"; echo_err "${MSG_WR}Service did not become active; rollback will be attempted. Inspect journalctl -u $QBT_SERVICE.${NC}"; exit 1; fi
+    if ! systemctl is-active --quiet "$QBT_SERVICE"; then
+        status_fail "Service did not become active; rollback will be attempted. Inspect journalctl -u $QBT_SERVICE."
+        exit 1
+    fi
     UPDATE_IN_PROGRESS=0
-    echo_err "${DB_GREEN}  DONE  ${NC}"
-    echo_err "\n${MSG_IG}Update successful: qBittorrent $expected_version is active.${NC}"
+    echo_err
+    status_ok "Update successful: qBittorrent $expected_version is active."
     echo_err "${MSG_IG}Rollback backup retained at: ${LYELLOW}$BACKUP_FILE${NC}"
     manage_backups "$BACKUP_FILE"
 }
@@ -1634,16 +1648,15 @@ run_update_workflow() {
 
     # The main menu only returns "update" when both components exist. Keep
     # this independent guard in case the installation changes after selection.
-    echo_n_err "\n        ${GREEN}- Rechecking qBitTorrent installation...                    ${NC}"
+    status_info "Rechecking the qBittorrent installation..."
     local binary_exists=0 unit_exists=0
     [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
     systemctl cat "$QBT_SERVICE" >/dev/null 2>&1 && unit_exists=1
     if [[ "$(qbt_component_mode "$binary_exists" "$unit_exists")" != "present" ]]; then
-        echo_err "${DB_RED} INCOMPLETE ${NC}"
-        echo_err "${MSG_WR}The qBittorrent executable/service changed after the menu was displayed. No update will be attempted. Rerun the script to install or repair via DietPi first.${NC}"
+        status_fail "The qBittorrent executable/service changed after the menu was displayed. No update will be attempted; repair the installation through DietPi first."
         exit 1
     fi
-    echo_err "${DB_GREEN} PRESENT ${NC}"
+    status_ok "qBittorrent executable and service are present."
     local service_execstart
     service_execstart="$(systemctl show -p ExecStart --value "$QBT_SERVICE" 2>/dev/null || true)"
     if [[ "$service_execstart" != *"$BIN_PATH"* ]]; then
@@ -1728,17 +1741,18 @@ dietpi_marker_present() {
 main() {
     print_logo
 
-    echo_n_err "\n\n${MSG_IG}Executing some preflight checks...${NC} \n"
+    echo_err
+    echo_err
+    status_info "Executing preflight checks..."
     if command -v sleep >/dev/null 2>&1; then sleep 1; fi
 
     check_root
 
-    # Check for DietPi
-    echo_n_err "\n        ${GREEN}- Detecting ${LYELLOW}DietPi${NC} ${GREEN}installation...                         ${NC}"
+    status_info "Checking for a DietPi installation..."
     if dietpi_marker_present; then
-        echo_err "${DB_GREEN} PRESENT ${NC}"
+        status_ok "DietPi installation detected."
     else
-        echo_err "${DB_RED} ABSENT  ${NC}\n\n       ${LYELLOW}This script is intended for DietPi system.${NC}\n       ${LRED}Script will now abort.${NC}\n"
+        status_fail "This script is intended for DietPi; aborting."
         exit 1
     fi
 
