@@ -26,8 +26,8 @@ If DietPi cannot verify the software state, restore and uninstall are disabled r
 5. Displays installed and latest qBittorrent versions, then asks you to select the architecture and libtorrent 2.0 or 1.2.
 6. Shows a final confirmation screen. It waits for approval before downloading or changing the executable.
 7. Downloads the selected asset and validates that it is non-empty, an ELF executable for the selected architecture, runnable for its `--version` self-test, and reports the expected qBittorrent version.
-8. Stages the candidate in `/usr/bin`, creates a timestamped backup of the current executable, then stops the service and atomically replaces the executable.
-9. Starts the service and checks that it becomes active. If replacement or startup fails, it attempts to restore the previous executable and service state.
+8. Stages the candidate in `/usr/bin` and creates a timestamped backup of the current executable. It then stops qBittorrent and saves the current `qBittorrent.conf` under `/var/backups/qbt-update-sh/` using the same backup identifier, pairing the config snapshot with that executable version.
+9. Atomically replaces the executable and starts the service. If replacement or startup fails, it attempts to restore the previous executable, pre-update configuration, and service state. The paired configuration snapshot is retained for a later restore.
 10. After a successful update, offers cleanup choices for older backups. The backup created for the current update is always retained.
 
 ### Restore workflow
@@ -36,10 +36,11 @@ If DietPi cannot verify the software state, restore and uninstall are disabled r
 2. Verifies that `qbittorrent.service` points to `/usr/bin/qbittorrent-nox` and locates the non-empty qBittorrent configuration file associated with that service's user/profile. If the existing configuration cannot be located, restore is refused rather than risking startup with a new profile and default WebUI credentials or port.
 3. Scans `/usr/bin/qbittorrent-nox.*.bak` and presents compatible backups newest first. Files must be regular, non-empty ELF executables, match the detected host architecture, and pass their `--version` self-test.
 4. Shows each candidate's qBittorrent version, filename and size, then asks the user to select one and confirm the restore.
-5. Stages the selected executable before stopping the service. If an executable is currently installed, it saves that version as a new timestamped safety backup. It also saves a private pre-restore copy of `qBittorrent.conf` under `/var/backups/qbt-update-sh/`, using a root-private directory and restrictive file permissions.
-6. Replaces the executable and preserves the service's prior active/inactive state. If a previously active service fails to start, the script attempts to restore the pre-restore executable and configuration.
-7. Checks whether the restored binary changed the configuration file on startup. If it did, the script offers to reapply the pre-restore configuration and restart qBittorrent. If the selected binary cannot start with that configuration, it attempts to return to the config it generated and restart the service. If recovery fails, executable rollback is attempted.
-8. Retains the selected source executable backup, any new executable safety backup, and the configuration snapshots. Restore does not run the older-executable-backup cleanup menu.
+5. Stages the selected executable before stopping the service. If an executable is currently installed, it saves that version as a new timestamped safety backup and saves a private pre-restore copy of the current `qBittorrent.conf` for rollback.
+6. If the selected executable has a matching pre-update config snapshot from an updater-managed update, the script applies that version-matched configuration before starting the restored executable. This matters because a newer qBittorrent version may migrate settings that an older version cannot use correctly.
+7. If the restored binary changes its paired configuration on startup, the script offers to reapply the configuration snapshot that belongs to that executable and restart qBittorrent. If recovery fails, it attempts to restore the previous executable and the pre-restore configuration.
+8. Older executable backups created before config snapshots were paired will be labelled as legacy backups. For those, the script can preserve the current config and roll it back on failure, but it cannot reconstruct pre-upgrade settings that were never saved alongside that executable.
+9. Retains the selected source executable backup, any new executable safety backup, and the configuration snapshots. Removing an older executable backup through the cleanup menu also removes its paired config snapshot; restore itself does not run that cleanup menu.
 
 Restoring an executable does not roll back downloaded files or the full torrent session state. Configuration recovery is best-effort; retain the displayed configuration snapshot path if WebUI credentials or ports need to be recovered manually.
 
@@ -86,7 +87,8 @@ sudo bash qbtupd.sh
 ## Recovery notes
 
 - The main menu offers restore only when DietPi confirms software ID 46 is installed and backup files matching `/usr/bin/qbittorrent-nox.*.bak` exist. Only compatible backups that pass the executable checks are selectable.
-- Restore requires the existing qBittorrent configuration and keeps a private copy in `/var/backups/qbt-update-sh/`. If the selected binary changes the config on startup, the script offers to reapply the previous config; if that cannot start, it attempts to recover using the generated config.
+- Each new updater-created executable backup is paired with the pre-update `qBittorrent.conf` snapshot sharing its timestamp/PID identifier in `/var/backups/qbt-update-sh/`. Restore applies that version-matched config and retains a separate safety copy of the currently installed config.
+- Older executable backups created before this pairing feature have no linked config snapshot. They cannot restore settings that changed or were lost after the original update; the restore menu explicitly warns about this.
 - When an executable is present, restore creates a safety backup of it. If the executable is missing, a failed restore attempts to return the target to that absent state.
 - Restore retains the chosen source backup and any safety backups. It does not run the executable-backup cleanup menu.
 - The uninstall menu action runs `dietpi-software uninstall 46` only after explicit confirmation, preserves a private qBittorrent configuration copy when one can be identified, and leaves updater executable backups untouched.
@@ -97,7 +99,7 @@ sudo bash qbtupd.sh
 
 ## Testing status
 
-The script changes should be checked with `bash -n qbtupd.sh` and ShellCheck, then tested in a disposable DietPi environment before using them on a live installation. In particular, test HTTP failures, malformed metadata, wrong-architecture downloads, restoring when software ID 46 is absent, configuration changes after restore, both configuration-recovery paths, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
+The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, and the software-state/config-snapshot unit tests, then tested in a disposable DietPi environment before using them on a live installation. In particular, test HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
 ## Upstream project
 
