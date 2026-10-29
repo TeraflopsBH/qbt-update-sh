@@ -292,7 +292,7 @@ perform_update() {
     staged_path="/usr/bin/.qbittorrent-nox.new.$$"
     if ! cp "$download_path" "$staged_path" || ! chmod 755 "$staged_path"; then rm -f "$staged_path"; echo_err "${MSG_WR}Could not stage executable in /usr/bin. Existing executable was not changed.${NC}"; exit 1; fi
     if [[ ! -x "$BIN_PATH" ]]; then rm -f "$staged_path"; echo_err "${MSG_WR}Existing qBittorrent executable is missing; refusing an unbacked replacement. Repair/install it with DietPi first.${NC}"; exit 1; fi
-    timestamp="$(date +'%Y%m%d_%H%M%S')"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
+    timestamp="$(date +'%Y%m%d_%H%M%S')_$"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
     if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then rm -f "$staged_path"; echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"; exit 1; fi
     echo_err "${MSG_IG}Created rollback backup: ${LYELLOW}$BACKUP_FILE${NC}"
     UPDATE_IN_PROGRESS=1
@@ -357,9 +357,16 @@ main() {
         exit 1
     fi
     local required_tool
-    for required_tool in curl jq file grep systemctl; do
+    for required_tool in curl jq file grep head systemctl; do
         if ! command -v "$required_tool" >/dev/null 2>&1; then echo_err "${MSG_WR}Required command '$required_tool' is missing. Install it before running this updater.${NC}"; exit 1; fi
     done
+    local service_execstart
+    service_execstart="$(systemctl show -p ExecStart --value "$QBT_SERVICE" 2>/dev/null || true)"
+    if [[ "$service_execstart" != *"$BIN_PATH"* ]]; then
+        echo_err "${MSG_WR}$QBT_SERVICE does not appear to execute $BIN_PATH. Refusing to replace a binary the service may not use.${NC}"
+        echo_err "          ExecStart: ${service_execstart:-unavailable}"
+        exit 1
+    fi
 
     # VERSION CHECKING LOGIC
     echo_err "\n\n${MSG_IG}Checking for available updates...      ${NC}"
