@@ -770,7 +770,11 @@ restore_backup() {
     else
         echo_err "${MSG_IG}$QBT_SERVICE was inactive before restore and remains stopped.${NC}"
     fi
-    echo_err "${MSG_IG}Pre-restore safety backup retained at: ${LYELLOW}$BACKUP_FILE${NC}"
+    if [[ -n "$BACKUP_FILE" ]]; then
+        echo_err "${MSG_IG}Pre-restore safety backup retained at: ${LYELLOW}$BACKUP_FILE${NC}"
+    else
+        echo_err "${MSG_IG}No pre-restore executable backup was needed because the target was absent.${NC}"
+    fi
     echo_err "${MSG_IG}The selected source backup was retained: ${LYELLOW}$selected_path${NC}"
 }
 
