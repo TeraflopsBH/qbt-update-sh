@@ -64,7 +64,7 @@ cleanup() {
     local status=$?
     if [[ $status -ne 0 && "${UPDATE_IN_PROGRESS:-0}" -eq 1 && -n "${BACKUP_FILE:-}" && -f "$BACKUP_FILE" ]]; then
         echo_err "\n${MSG_WR}Update failed; attempting to restore the previous executable... ${NC}"
-        local restore_path="/usr/bin/.qbittorrent-nox.rollback.$"
+        local restore_path="/usr/bin/.qbittorrent-nox.rollback.${BASHPID}"
         if cp -p "$BACKUP_FILE" "$restore_path" && chmod 755 "$restore_path" && mv -f "$restore_path" "$BIN_PATH"; then
             systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
             if systemctl start "$QBT_SERVICE"; then echo_err "${MSG_IG}Previous executable restored and service start requested.${NC}"
@@ -292,7 +292,7 @@ perform_update() {
     staged_path="/usr/bin/.qbittorrent-nox.new.$$"
     if ! cp "$download_path" "$staged_path" || ! chmod 755 "$staged_path"; then rm -f "$staged_path"; echo_err "${MSG_WR}Could not stage executable in /usr/bin. Existing executable was not changed.${NC}"; exit 1; fi
     if [[ ! -x "$BIN_PATH" ]]; then rm -f "$staged_path"; echo_err "${MSG_WR}Existing qBittorrent executable is missing; refusing an unbacked replacement. Repair/install it with DietPi first.${NC}"; exit 1; fi
-    timestamp="$(date +'%Y%m%d_%H%M%S')_$"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
+    timestamp="$(date +'%Y%m%d_%H%M%S')_${BASHPID}"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
     if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then rm -f "$staged_path"; echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"; exit 1; fi
     echo_err "${MSG_IG}Created rollback backup: ${LYELLOW}$BACKUP_FILE${NC}"
     UPDATE_IN_PROGRESS=1
