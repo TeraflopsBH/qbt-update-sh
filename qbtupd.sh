@@ -382,7 +382,7 @@ get_architecture_interactive() {
         echo_err "          Or choose an alternative architecture, or select Abort."
     else
         echo_err "${MSG_WY}${LMAGENTA}$raw${NC} is not a supported artifact architecture."
-        echo_err "${MSG_WR}Choose Abort. No binary will be replaced.${NC}"
+        echo_err "${MSG_WR}Choose Cancel. No binary will be replaced.${NC}"
     fi
 
     while true; do
@@ -438,7 +438,10 @@ get_libtorrent_version() {
         echo_err
         echo_n_err "\n ${GREEN}Enter choice ${LYELLOW}${BOLD}${ULINE}[1]${NC}${GREEN}, ${LYELLOW}${BOLD}${ULINE}[2]${NC}, or ${LYELLOW}${BOLD}${ULINE}[0]${NC}: "
         
-        read -r choice < /dev/tty || choice="1"
+        if ! read -r choice < /dev/tty; then
+            echo_err "${MSG_WY}Libtorrent selection cancelled (input closed).${NC}"
+            return 1
+        fi
 
         case "$choice" in
             1|"") ver="2.0"; break ;;
