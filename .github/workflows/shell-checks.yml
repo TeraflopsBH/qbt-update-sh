@@ -28,7 +28,10 @@ jobs:
         run: bash -n qbtupd.sh
 
       - name: Run ShellCheck
-        run: shellcheck -x qbtupd.sh tests/test_dietpi_software_state.sh
+        run: shellcheck -x qbtupd.sh tests/test_dietpi_software_state.sh tests/test_menu_cancellation.sh
 
       - name: Test DietPi software state parsing
         run: bash tests/test_dietpi_software_state.sh
+
+      - name: Test menu cancellation routing
+        run: bash tests/test_menu_cancellation.sh
