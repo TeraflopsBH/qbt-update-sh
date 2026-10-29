@@ -181,12 +181,18 @@ manage_backups() {
     local current_backup="$1"
     local backups=()
     
-    # Finding files matching qbittorrent-nox.*.bak in /usr/bin/, excluding the backup created ($current_backup)
-    while IFS= read -r line; do
-        if [[ "$line" != "$current_backup" ]]; then
-            backups+=("$line")
-        fi
-    done < <(ls -1 ${BIN_PATH}.*.bak 2>/dev/null | sort -r)
+    # Expand the backup glob safely; a missing match must not become a literal filename.
+    local backup_files=()
+    shopt -s nullglob
+    backup_files=("${BIN_PATH}".*.bak)
+    shopt -u nullglob
+    if [[ ${#backup_files[@]} -gt 0 ]]; then
+        while IFS= read -r line; do
+            if [[ "$line" != "$current_backup" ]]; then
+                backups+=("$line")
+            fi
+        done < <(printf '%s\n' "${backup_files[@]}" | sort -r)
+    fi
 
     if [[ ${#backups[@]} -eq 0 ]]; then
         return 0
