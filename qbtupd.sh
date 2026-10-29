@@ -57,10 +57,25 @@ readonly MSG_IR=" ${B_CYAN} INFO ${NC} - ${LRED}"
 # SYSTEM FUNCTIONS
 ################################################################
 
+TMP_DIR=""
+BACKUP_FILE=""
+UPDATE_IN_PROGRESS=0
 cleanup() {
-    if [[ -n "${TMP_DIR:-}" ]] && [[ -d "$TMP_DIR" ]]; then
-        rm -rf "$TMP_DIR"
+    local status=$?
+    if [[ $status -ne 0 && "${UPDATE_IN_PROGRESS:-0}" -eq 1 && -n "${BACKUP_FILE:-}" && -f "$BACKUP_FILE" ]]; then
+        echo_err "\n${MSG_WR}Update failed; attempting to restore the previous executable... ${NC}"
+        local restore_path="/usr/bin/.qbittorrent-nox.rollback.$"
+        if cp -p "$BACKUP_FILE" "$restore_path" && chmod 755 "$restore_path" && mv -f "$restore_path" "$BIN_PATH"; then
+            systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
+            if systemctl start "$QBT_SERVICE"; then echo_err "${MSG_IG}Previous executable restored and service start requested.${NC}"
+            else echo_err "${MSG_WR}Previous executable restored, but service did not start. Check journalctl -u $QBT_SERVICE${NC}"; fi
+        else
+            rm -f "$restore_path"
+            echo_err "${MSG_WR}AUTOMATIC ROLLBACK FAILED. Backup remains at: $BACKUP_FILE${NC}"
+        fi
     fi
+    if [[ -n "${TMP_DIR:-}" && -d "$TMP_DIR" ]]; then rm -rf -- "$TMP_DIR"; fi
+    return "$status"
 }
 trap cleanup EXIT
 
@@ -83,10 +98,10 @@ check_root() {
 }
 
 check_internet() {
-    echo_n_err "\n        ${GREEN}- Detecting internet connection...                         ${NC}"
-    if ! ping -c 1 -W 2 cloudflare.com > /dev/null 2>&1; then
-        echo_err "${DB_RED} ABSENT  ${NC}"
-        echo_err "\n${MSG_WR}Cannot run without internet connection.${NC}\n"
+    echo_n_err "\n        ${GREEN}- Checking HTTPS access to GitHub...                      ${NC}"
+    if ! curl -fsSL --connect-timeout 10 --max-time 30 "$VERSION_JSON_URL" -o /dev/null; then
+        echo_err "${DB_RED} FAILED  ${NC}"
+        echo_err "\n${MSG_WR}Cannot fetch release metadata from GitHub. Check DNS, HTTPS access, and system time.${NC}\n"
         exit 1
     fi
     echo_err "${DB_GREEN} PRESENT ${NC}"
@@ -113,55 +128,25 @@ EOF
 ################################################################
 
 get_architecture_interactive() {
-    local detected
-    detected="$(uname -m)"
-    local selected_arch=""
-
+    local detected raw selected_arch=""
+    raw="$(uname -m)"
+    case "$raw" in armv7l|armv7) detected="armv7";; arm64|aarch64) detected="aarch64";; x86_64|amd64) detected="x86_64";; armhf) detected="armhf";; *) detected="$raw";; esac
     echo_err
-    echo_err "${MSG_IG}Detected system architecture..............................${DB_MAGENTA} $detected ${NC}"
-    
-    if [[ "$detected" =~ ^(armhf|armv7|aarch64|x86_64)$ ]]; then
-        echo_err "\n${MSG_IG}Type${NC} \"${LCYAN}0${NC}\" ${GREEN}then press${NC} ${DB_BLUE} ENTER ${NC} ${GREEN}to install the autodetected:  ${DB_MAGENTA} $detected ${NC}"
-        echo_err "          ${GREEN}version... or press${NC} ${DB_BLUE} ENTER ${NC} ${LYELLOW}${BOLD}${ULINE}without entering any number${NC} ${GREEN}to${NC} ${LRED}<ABORT>${NC}"
-    else
-        echo_err "${MSG_WY}${LMAGENTA}$detected detected. Currently, it is not supported."
-        echo_err "${MSG_WG}You should choose option${NC} \"${LCYAN}3${NC}\" ${LRED} or just press ${LCYAN}ENTER${NC} ${LRED}to abort...${NC}"
-    fi
-
+    echo_err "${MSG_IG}Detected system architecture..............................${DB_MAGENTA} $raw ${NC}"
+    case "$detected" in
+        armhf|armv7|aarch64|x86_64) echo_err "${MSG_IG}Normalized artifact architecture: ${DB_MAGENTA}$detected${NC}";;
+        *) echo_err "${MSG_WR}Unsupported architecture '$raw'. Refusing to offer incompatible binaries.${NC}"; exit 1;;
+    esac
     while true; do
-        echo_err
-        echo_err "${YELLOW}          -----------------------${NC}"
-        if [[ "$detected" =~ ^(armhf|armv7|aarch64|x86_64)$ ]]; then
-            echo_err "           0. ${LMAGENTA}${detected}${NC} ${LGREEN}(${LCYAN}detected${NC}${LGREEN})${NC}"
-        fi
-        echo_err "           1. ${LBLUE}aarch64${NC}"
-        echo_err "           2. ${LYELLOW}x86_64${NC}"
-        echo_err "           3. ${LRED}Abort${NC}"
-        echo_err "${YELLOW}          -----------------------${NC}"
-        echo_err
-        echo_n_err " ${LYELLOW}Choice: ${NC}"
-        
+        echo_err "${YELLOW}  0. Use detected architecture: ${LMAGENTA}$detected${NC}"
+        echo_err "${YELLOW}  3. Abort${NC}"
+        echo_n_err " ${LYELLOW}Choice [0]: ${NC}"
         local selection
         read -r selection < /dev/tty || selection="3"
-        selection=${selection:-3}
-
-        case $selection in
-            0)
-                if [[ "$detected" =~ ^(armhf|armv7|aarch64|x86_64)$ ]]; then
-                    selected_arch="$detected"
-                    break
-                else
-                    echo_err "${MSG_WY}Option 0 not available for unsupported architecture.${NC}"
-                fi
-                ;;
-            1) selected_arch="aarch64"; break ;;
-            2) selected_arch="x86_64"; break ;;
-            3) echo_err "${MSG_WR}Aborting the script${NC}\n"; exit 1 ;;
-            *) echo_err "${MSG_WY}Invalid selection${NC}\n";;
-        esac
+        selection=${selection:-0}
+        case "$selection" in 0) selected_arch="$detected"; break;; 3) echo_err "${MSG_WR}Aborting the script${NC}\n"; exit 1;; *) echo_err "${MSG_WY}Invalid selection. Only the detected architecture is allowed.${NC}";; esac
     done
-
-    echo_err "\n${MSG_IG}Setting${NC} ${DB_MAGENTA}$selected_arch${NC} ${GREEN}as system architecture...${NC}\n"
+    echo_err "\n${MSG_IG}Using artifact architecture: ${DB_MAGENTA}$selected_arch${NC}\n"
     echo "$selected_arch"
 }
 
@@ -272,72 +257,55 @@ stop_service() {
 
 fetch_release_data() {
     local json_content
-    if ! json_content=$(curl -sL "$VERSION_JSON_URL"); then
-        echo_err "${MSG_WR}Failed to fetch version info from GitHub.${NC}"
-        exit 1
+    if ! json_content=$(curl -fsSL --connect-timeout 10 --max-time 30 "$VERSION_JSON_URL"); then
+        echo_err "${MSG_WR}Failed to fetch valid release metadata from GitHub (HTTP/network error).${NC}"; exit 1
+    fi
+    if ! printf '%s' "$json_content" | jq -e 'type == "object"' >/dev/null 2>&1; then
+        echo_err "${MSG_WR}GitHub returned invalid JSON release metadata.${NC}"; exit 1
     fi
     echo "$json_content"
 }
 
 perform_update() {
-    local url="$1"
-    
-    echo_n_err "${MSG_IG}Making temp download directory....................         ${NC}";
-    TMP_DIR=$(mktemp -d)
-    local download_path="$TMP_DIR/qbittorrent-nox"
+    local url="$1" expected_version="$2"
+    local download_path candidate_version file_description timestamp staged_path retries
+    echo_n_err "${MSG_IG}Making temporary download directory....................     ${NC}"
+    TMP_DIR="$(mktemp -d)"; download_path="$TMP_DIR/qbittorrent-nox"
     echo_err "${DB_GREEN}  DONE  ${NC}"
-
-    # BACKUP LOGIC
-    if [ -e "$BIN_PATH" ]; then
-        local timestamp
-        timestamp=$(date +"%Y%m%d_%H%M%S")
-        local backup_file="${BIN_PATH}.${timestamp}.bak"
-        
-        echo_err "        - ${GREEN}Backing up the existing executable of${NC}"
-        echo_n_err "          ${LBLUE}$(basename "$BIN_PATH")${NC} ${GREEN}to${NC} ${LYELLOW}$(basename "$backup_file")${NC}...  "
-        
-        if cp "$BIN_PATH" "$backup_file"; then
-            echo_err "${DB_GREEN}  DONE  ${NC}"
-            echo_err "          ${GREEN}Backup location: ${DGRAY}${backup_file}${NC}"
-        else
-            echo_err "${DB_RED} FAILED  ${NC}"
-            echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"
-            exit 1
-        fi
-        
-        # Checking and managing previous backups (excluding the one just created)
-        manage_backups "$backup_file"
+    echo_err "\n${MSG_IG}Downloading and validating the candidate binary... ${NC}"
+    if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 600 --progress-bar "$url" -o "$download_path"; then
+        echo_err "\n${MSG_WR}Download failed (HTTP error, timeout, or network failure). Existing executable was not changed.${NC}"; exit 1
     fi
-
-    echo_err "\n${MSG_IG}Downloading the latest${NC} ${LBLUE}qbittorrent-nox-static${NC}"
-    echo_err "          ${GREEN}file to the temporary directory...${NC}"
-    echo_err "          "
-
-    if curl -# -L "$url" -o "$download_path"; then
-         echo_err "${GREEN} .................................................................... ${DB_GREEN}  DONE  ${NC}\n"
-    else
-         echo_err "\n${MSG_WR}Download failed.${NC}"
-         exit 1
+    if [[ ! -s "$download_path" ]]; then echo_err "${MSG_WR}Downloaded file is empty. Existing executable was not changed.${NC}"; exit 1; fi
+    file_description="$(file -b "$download_path" 2>/dev/null || true)"
+    if [[ "$file_description" != *ELF* ]]; then echo_err "${MSG_WR}Downloaded file is not a recognized ELF executable ($file_description). Existing executable was not changed.${NC}"; exit 1; fi
+    if ! candidate_version="$("$download_path" --version 2>&1)"; then echo_err "${MSG_WR}Downloaded executable failed its --version self-test. Existing executable was not changed.${NC}"; exit 1; fi
+    if ! printf '%s\n' "$candidate_version" | grep -Fq "$expected_version"; then
+        echo_err "${MSG_WR}Downloaded executable version does not match metadata version $expected_version. Existing executable was not changed.${NC}"
+        echo_err "          Reported version: $candidate_version"; exit 1
     fi
-
-    echo_err "\n${MSG_IG}Overwriting existing ${LYELLOW}DietPi${NC} ${GREEN}version at${NC}";
-    echo_n_err "          ${LYELLOW}/usr/bin/ ${GREEN}with the downloaded one...            ";
-    mv "$download_path" "$BIN_PATH"
-    echo_err "            ${DB_GREEN}  DONE  ${NC}"
-
-    echo_n_err "\n${MSG_IG}Chmod ${LBLUE}qbittorrent-nox${NC}${GREEN} to ${LYELLOW}755${GREEN}........            ${NC}";
-    chmod 755 "$BIN_PATH"
-    echo_err "            ${DB_GREEN}  DONE  ${NC}"
-
-    echo_n_err "\n${MSG_IG}Starting${NC} ${LBLUE}qbittorrent-nox${NC} ${GREEN}service....            ${NC}";
-    systemctl start "$QBT_SERVICE"
-    if systemctl is-active --quiet "$QBT_SERVICE"; then
-         echo_err "            ${DB_GREEN}  DONE  ${NC}"
-         echo_err "\n${MSG_IG}Update successful${NC}\n";
-    else
-         echo_err "${DB_RED} FAILED  ${NC}\n"
-         exit 1
-    fi
+    chmod 755 "$download_path"
+    staged_path="/usr/bin/.qbittorrent-nox.new.$$"
+    if ! cp "$download_path" "$staged_path" || ! chmod 755 "$staged_path"; then rm -f "$staged_path"; echo_err "${MSG_WR}Could not stage executable in /usr/bin. Existing executable was not changed.${NC}"; exit 1; fi
+    if [[ ! -x "$BIN_PATH" ]]; then rm -f "$staged_path"; echo_err "${MSG_WR}Existing qBittorrent executable is missing; refusing an unbacked replacement. Repair/install it with DietPi first.${NC}"; exit 1; fi
+    timestamp="$(date +'%Y%m%d_%H%M%S')"; BACKUP_FILE="${BIN_PATH}.${timestamp}.bak"
+    if ! cp -p "$BIN_PATH" "$BACKUP_FILE"; then rm -f "$staged_path"; echo_err "${MSG_WR}Cannot create backup. Update aborted for safety.${NC}"; exit 1; fi
+    echo_err "${MSG_IG}Created rollback backup: ${LYELLOW}$BACKUP_FILE${NC}"
+    stop_service
+    UPDATE_IN_PROGRESS=1
+    echo_err "\n${MSG_IG}Atomically replacing the executable... ${NC}"
+    if ! mv -f "$staged_path" "$BIN_PATH"; then rm -f "$staged_path"; echo_err "${MSG_WR}Replacement failed; rollback will be attempted.${NC}"; exit 1; fi
+    echo_n_err "${MSG_IG}Starting ${LBLUE}qbittorrent-nox${NC} ${GREEN}service... ${NC}"
+    systemctl reset-failed "$QBT_SERVICE" >/dev/null 2>&1 || true
+    if ! systemctl start "$QBT_SERVICE"; then echo_err "${DB_RED} FAILED ${NC}"; echo_err "${MSG_WR}Service start failed; rollback will be attempted.${NC}"; exit 1; fi
+    retries=10
+    while (( retries > 0 )); do systemctl is-active --quiet "$QBT_SERVICE" && break; sleep 1; retries=$((retries - 1)); done
+    if ! systemctl is-active --quiet "$QBT_SERVICE"; then echo_err "${DB_RED} FAILED ${NC}"; echo_err "${MSG_WR}Service did not become active; rollback will be attempted. Inspect journalctl -u $QBT_SERVICE.${NC}"; exit 1; fi
+    UPDATE_IN_PROGRESS=0
+    echo_err "${DB_GREEN}  DONE  ${NC}"
+    echo_err "\n${MSG_IG}Update successful: qBittorrent $expected_version is active.${NC}"
+    echo_err "${MSG_IG}Rollback backup retained at: ${LYELLOW}$BACKUP_FILE${NC}"
+    manage_backups "$BACKUP_FILE"
 }
 
 ################################################################
@@ -362,11 +330,14 @@ main() {
         exit 1
     fi
 
-    # Check for qBitTorrent installation presence
+    # Check the executable and service unit independently.
     echo_n_err "\n        ${GREEN}- Detecting qBitTorrent installation...                    ${NC}"
-    if [[ -x "$BIN_PATH" ]] || systemctl list-unit-files "$QBT_SERVICE" &>/dev/null; then
+    local binary_exists=0 unit_exists=0
+    [[ -x "$BIN_PATH" ]] && binary_exists=1
+    systemctl cat "$QBT_SERVICE" >/dev/null 2>&1 && unit_exists=1
+    if (( binary_exists == 1 && unit_exists == 1 )); then
         echo_err "${DB_GREEN} PRESENT ${NC}"
-    else
+    elif (( binary_exists == 0 && unit_exists == 0 )); then
         echo_err "${DB_RED} ABSENT  ${NC}\n"
         echo_n_err "${MSG_IG}Would you like to install it: (y/n):${NC} "
         local install_qbt
@@ -374,26 +345,29 @@ main() {
         if [[ $install_qbt =~ ^[Yy]$ ]]; then
             echo_err "${MSG_IG}Installing ${LBLUE}qBitTorrent${NC} ${GREEN}software via DietPi...${NC}"
             /boot/dietpi/dietpi-software install 46
-            if ! [[ -x "$BIN_PATH" ]]; then
-                echo_err "\n${MSG_WR}Installation failed or binary is missing.${NC}"
-                exit 1
-            fi
-        else
-            echo_err "\n${MSG_WY}OK. Script will now abort.${NC}\n"
-            exit 1
-        fi
+            if ! [[ -x "$BIN_PATH" ]] || ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then echo_err "\n${MSG_WR}Installation failed or expected binary/service unit is missing.${NC}"; exit 1; fi
+        else echo_err "\n${MSG_WY}OK. Script will now abort.${NC}\n"; exit 1; fi
+    else
+        echo_err "${DB_RED} INCONSISTENT ${NC}\n"
+        echo_err "${MSG_WR}Only one expected component (binary or systemd unit) exists. Repair the DietPi installation before updating.${NC}"
+        exit 1
     fi
+    local required_tool
+    for required_tool in curl jq file grep systemctl; do
+        if ! command -v "$required_tool" >/dev/null 2>&1; then echo_err "${MSG_WR}Required command '$required_tool' is missing. Install it before running this updater.${NC}"; exit 1; fi
+    done
 
     # VERSION CHECKING LOGIC
     echo_err "\n\n${MSG_IG}Checking for available updates...      ${NC}"
     local json_data
     json_data=$(fetch_release_data)
     local latest_ver
-    latest_ver=$(echo "$json_data" | grep -o '"qbittorrent": *"[^"]*"' | cut -d'"' -f4)
-
-    local current_ver="UNKNOWN"
-    if [[ -x "$BIN_PATH" ]]; then
-        current_ver=$("$BIN_PATH" --version | awk '{print $2}' | sed 's/v//')
+    if ! latest_ver="$(printf '%s' "$json_data" | jq -er '.qbittorrent | strings | select(length > 0)')"; then echo_err "${MSG_WR}Metadata is missing a qBittorrent version. Aborting before stopping the service.${NC}"; exit 1; fi
+    if [[ ! "$latest_ver" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?([.-][0-9A-Za-z.+-]+)?$ ]]; then echo_err "${MSG_WR}Unexpected qBittorrent version format: '$latest_ver'. Aborting.${NC}"; exit 1; fi
+    local current_ver="UNKNOWN" current_output=""
+    if current_output="$("$BIN_PATH" --version 2>&1)"; then
+        current_ver="$(printf '%s\n' "$current_output" | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1 || true)"
+        [[ -n "$current_ver" ]] || current_ver="UNKNOWN"
     fi
 
     echo_err "          ${YELLOW}---------------------------------------"
@@ -402,8 +376,10 @@ main() {
     
     if [[ "$current_ver" == "$latest_ver" ]]; then
         echo_err "          ${MSG_IG}Status:        ${DB_GREEN} UP TO DATE ${NC}"
+    elif [[ "$current_ver" == "UNKNOWN" ]]; then
+        echo_err "          ${MSG_WY}Status: installed version unknown; cannot determine update state.${NC}"
     else
-        echo_err "          ${MSG_IG}Status: ${DB_YELLOW} UPDATE AVAILABLE ${NC}"
+        echo_err "          ${MSG_IG}Status: version differs; verify release before proceeding. ${NC}"
     fi
     echo_err "          ${YELLOW}---------------------------------------"
 
@@ -421,27 +397,19 @@ main() {
     done
 
     echo_err "\n${MSG_IG}Preparing update workflow...           ${NC}\n"
-
-    stop_service
-
-    # Selection menus
     local arch
-    arch=$(get_architecture_interactive)
-
+    arch="$(get_architecture_interactive)"
     local lib_ver
-    lib_ver=$(get_libtorrent_version)
-
-    # Construction of specific download URL based on libtorrent version and architecture
+    lib_ver="$(get_libtorrent_version)"
     local lib_ver_id
     if [[ "$lib_ver" == "2.0" ]]; then
-        lib_ver_id=$(echo "$json_data" | grep -o '"libtorrent_2_0": *"[^"]*"' | cut -d'"' -f4)
+        lib_ver_id="$(printf '%s' "$json_data" | jq -er '.libtorrent_2_0 | strings | select(length > 0)')" || { echo_err "${MSG_WR}Metadata is missing libtorrent_2_0. Aborting before stopping the service.${NC}"; exit 1; }
     else
-        lib_ver_id=$(echo "$json_data" | grep -o '"libtorrent_1_2": *"[^"]*"' | cut -d'"' -f4)
+        lib_ver_id="$(printf '%s' "$json_data" | jq -er '.libtorrent_1_2 | strings | select(length > 0)')" || { echo_err "${MSG_WR}Metadata is missing libtorrent_1_2. Aborting before stopping the service.${NC}"; exit 1; }
     fi
-    
+    if [[ ! "$lib_ver_id" =~ ^[0-9A-Za-z._+-]+$ ]]; then echo_err "${MSG_WR}Unexpected libtorrent version identifier: '$lib_ver_id'. Aborting.${NC}"; exit 1; fi
     local final_url="https://github.com/userdocs/qbittorrent-nox-static/releases/download/release-${latest_ver}_v${lib_ver_id}/${arch}-qbittorrent-nox"
-
-    perform_update "$final_url"
+    perform_update "$final_url" "$latest_ver"
 }
 
 main "$@"
