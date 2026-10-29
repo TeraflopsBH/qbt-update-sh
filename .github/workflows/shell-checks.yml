@@ -28,4 +28,7 @@ jobs:
         run: bash -n qbtupd.sh
 
       - name: Run ShellCheck
-        run: shellcheck qbtupd.sh
+        run: shellcheck qbtupd.sh tests/test_dietpi_software_state.sh
+
+      - name: Test DietPi software state parsing
+        run: bash tests/test_dietpi_software_state.sh
