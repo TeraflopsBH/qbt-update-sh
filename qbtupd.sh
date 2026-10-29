@@ -98,7 +98,7 @@ cleanup() {
                         if systemctl is-active --quiet "$QBT_SERVICE"; then
                             break
                         fi
-                        sleep 1
+                        if command -v sleep >/dev/null 2>&1; then sleep 1; fi
                         retries=$((retries - 1))
                     done
                     if systemctl is-active --quiet "$QBT_SERVICE"; then
@@ -157,7 +157,7 @@ ensure_dependencies() {
     local required_command package
     local -a required_commands=(
         curl jq file grep head sort du cut basename sleep mktemp
-        cp chmod mv rm cat date uname
+        cp chmod mv rm date uname
     )
     local -a missing_packages=()
 
@@ -268,9 +268,12 @@ print_logo() {
     if command -v clear >/dev/null 2>&1; then
         clear >&2 || true
     else
-        printf '\\033[2J\\033[H' >&2
+        printf '\033[2J\033[H' >&2
     fi
-    cat << "EOF" >&2
+    local line
+    while IFS= read -r line; do
+        printf '%s\n' "$line" >&2
+    done << "EOF"
 
              ___  _ __ ______                      __      _  __
        ___ _/ _ )(_) //_  __/__  ___________ ___  / /_  NO| |/_/
@@ -406,8 +409,8 @@ manage_backups() {
     echo_err "\n          ${GREEN}How would you like to manage them?${NC}\n"
     echo_err "          ${YELLOW}-----------------------------------------${NC}"
     echo_err "           1. ${LGREEN}Keep all${NC}"
-    echo_err "           2. ${LYELLOW}Keep only the newest (delete others)${NC}"
-    echo_err "           3. ${LRED}Delete all previous backups${NC}"
+    echo_err "           2. ${LYELLOW}Keep current + newest previous backup${NC}"
+    echo_err "           3. ${LRED}Delete all previous backups (keep current)${NC}"
     echo_err "          ${YELLOW}-----------------------------------------${NC}"
     echo_n_err "\n${GREEN}Enter choice ${LYELLOW}${BOLD}${ULINE}[1]${NC}: "
     
@@ -416,7 +419,7 @@ manage_backups() {
     choice=${choice:-1}
 
     case "$choice" in
-        1) echo_err "\n${MSG_IG}Keeping all previous backups.${NC}" ;;
+        1) echo_err "\n${MSG_IG}Keeping current and all previous backups.${NC}" ;;
         2) 
             echo_n_err "\n${MSG_IG}Cleaning up old backups.............                        ${NC}"
             for ((i=1; i<${#backups[@]}; i++)); do
@@ -425,7 +428,7 @@ manage_backups() {
             echo_err "${DB_GREEN}  DONE  ${NC}"
             ;;
         3)
-            echo_n_err "\n${MSG_IG}Deleting all previous backups.............                  ${NC}"
+            echo_n_err "\n${MSG_IG}Deleting all previous backups (current backup retained).... ${NC}"
             for b in "${backups[@]}"; do
                 rm -f "$b"
             done
