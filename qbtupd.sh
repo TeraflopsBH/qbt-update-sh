@@ -895,7 +895,7 @@ print_restore_warning() {
 restore_backup() {
     local raw_arch detected_arch backup description output version size
     local current_version="UNKNOWN" current_output="" service_execstart
-    local selected_index="" selected_path="" selected_version="" timestamp retries config_snapshot
+    local selected_index="" selected_path="" selected_version="" timestamp retries config_snapshot config_snapshot_id
     local -a backup_files=() sorted_backups=() restore_candidates=() restore_versions=() restore_config_snapshots=()
 
     if ! require_dietpi_qbt_installed "restore"; then exit 1; fi
@@ -1060,9 +1060,21 @@ restore_backup() {
     UPDATE_IN_PROGRESS=1
     stop_service
 
-    if ! CONFIG_BACKUP_FILE="$(save_qbt_config_backup "$QBT_CONFIG_PATH")"; then
-        echo_err "${MSG_WR}Restore aborted because qBittorrent configuration could not be preserved.${NC}"
-        exit 1
+    if [[ -n "$BACKUP_FILE" ]]; then
+        # The current executable's safety backup also gets its own matching
+        # config snapshot, so that backup remains a complete restore point later.
+        config_snapshot_id="${BACKUP_FILE##*/}"
+        config_snapshot_id="${config_snapshot_id#qbittorrent-nox.}"
+        config_snapshot_id="${config_snapshot_id%.bak}"
+        if ! CONFIG_BACKUP_FILE="$(save_qbt_config_backup "$QBT_CONFIG_PATH" "$config_snapshot_id")"; then
+            echo_err "${MSG_WR}Restore aborted because qBittorrent configuration could not be preserved.${NC}"
+            exit 1
+        fi
+    else
+        if ! CONFIG_BACKUP_FILE="$(save_qbt_config_backup "$QBT_CONFIG_PATH")"; then
+            echo_err "${MSG_WR}Restore aborted because qBittorrent configuration could not be preserved.${NC}"
+            exit 1
+        fi
     fi
     echo_err "${MSG_IG}Pre-restore configuration safety snapshot saved: ${LYELLOW}$CONFIG_BACKUP_FILE${NC}"
     if [[ -n "$CONFIG_RESTORE_FILE" ]]; then
