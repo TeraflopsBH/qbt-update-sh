@@ -98,7 +98,7 @@ cleanup() {
                         if systemctl is-active --quiet "$QBT_SERVICE"; then
                             break
                         fi
-                        if command -v sleep >/dev/null 2>&1; then sleep 1; fi
+                        sleep 1
                         retries=$((retries - 1))
                     done
                     if systemctl is-active --quiet "$QBT_SERVICE"; then
@@ -565,7 +565,7 @@ main() {
     print_logo
     
     echo_n_err "\n\n${MSG_IG}Executing some preflight checks...${NC} \n"
-    sleep 1
+    if command -v sleep >/dev/null 2>&1; then sleep 1; fi
     
     check_root
 
