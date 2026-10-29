@@ -43,3 +43,20 @@ if config_snapshot_for_binary "$binary_backup" "$tmp_dir" >/dev/null; then
     exit 1
 fi
 printf 'PASS: legacy executable backup without config snapshot is detected\n'
+
+assert_value() {
+    local description="$1" actual="$2" expected="$3"
+    if [[ "$actual" != "$expected" ]]; then
+        printf 'FAIL: %s: expected <%s>, got <%s>\\n' "$description" "$expected" "$actual" >&2
+        exit 1
+    fi
+    printf 'PASS: %s\\n' "$description"
+}
+
+assert_value "both qBittorrent components absent routes to install menu" "$(qbt_component_mode 0 0)" "absent"
+assert_value "binary without service routes to repair menu" "$(qbt_component_mode 1 0)" "inconsistent"
+assert_value "service without binary routes to repair menu" "$(qbt_component_mode 0 1)" "inconsistent"
+assert_value "binary and service present permits update menu" "$(qbt_component_mode 1 1)" "present"
+assert_value "software not installed selects DietPi install" "$(dietpi_qbt_install_command 0)" "install"
+assert_value "unknown DietPi state selects DietPi install" "$(dietpi_qbt_install_command unknown)" "install"
+assert_value "DietPi installed state with missing files selects reinstall" "$(dietpi_qbt_install_command 2)" "reinstall"
