@@ -37,10 +37,7 @@ readonly LYELLOW='\033[1;33m'
 readonly LGRAY='\033[0;37m'
 
 # Background Colors
-readonly B_RED='\033[41;37m'
 readonly DB_RED='\033[41;1;37m'
-readonly DB_GREEN='\033[42;1;37m'
-readonly B_CYAN='\033[46;37m'
 readonly DB_MAGENTA='\033[45;1;37m'
 readonly DB_YELLOW='\033[43;1;37m'
 
