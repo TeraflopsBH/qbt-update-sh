@@ -513,9 +513,7 @@ manage_backups() {
 ################################################################
 
 dietpi_qbt_software_state() {
-    # DietPi emits rows such as: "ID 46 | =2 | qBittorrent | ...".
-    # State 2 means installed; accept spacing and the optional "=" marker.
-    local output line
+    local output
     if [[ ! -x "/boot/dietpi/dietpi-software" ]]; then
         printf '%s\n' "unknown"
         return 0
@@ -524,12 +522,31 @@ dietpi_qbt_software_state() {
         printf '%s\n' "unknown"
         return 0
     fi
+    parse_dietpi_qbt_software_state "$output"
+}
+
+# Parse both current DietPi output (e.g. "qbittorrent|2|...") and legacy
+# numeric/display formats (e.g. "46|2|..." or "ID 46 | =2 | ...").
+# State 2 means installed; state 0 means not installed.
+parse_dietpi_qbt_software_state() {
+    local output="$1" line
     while IFS= read -r line || [[ -n "$line" ]]; do
+        # Current DietPi uses named software IDs in machine-readable output.
+        if [[ "$line" =~ ^[[:space:]]*qbittorrent([[:space:]]+DISABLED)?\|([0-9]+)\| ]]; then
+            printf '%s\n' "${BASH_REMATCH[2]}"
+            return 0
+        fi
+        # Older machine-readable output used numeric software IDs.
+        if [[ "$line" =~ ^[[:space:]]*46([[:space:]]+DISABLED)?\|([0-9]+)\| ]]; then
+            printf '%s\n' "${BASH_REMATCH[2]}"
+            return 0
+        fi
+        # Older human-readable output used "ID 46 | =2 | ..." (or "id").
         if [[ "$line" =~ ^[[:space:]]*[iI][dD][[:space:]]+46[[:space:]]*\|[[:space:]]*=?([0-9]+)[[:space:]]*\| ]]; then
             printf '%s\n' "${BASH_REMATCH[1]}"
             return 0
         fi
-        # Also accept a plain numeric-ID row, for older/alternate output formats.
+        # Also accept a plain numeric row in older/alternate output.
         if [[ "$line" =~ ^[[:space:]]*46[[:space:]]*\|[[:space:]]*=?([0-9]+)[[:space:]]*\| ]]; then
             printf '%s\n' "${BASH_REMATCH[1]}"
             return 0
