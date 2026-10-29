@@ -865,6 +865,58 @@ dietpi_qbt_install_command() {
     fi
 }
 
+install_qbittorrent_via_dietpi() {
+    local software_state command_name binary_exists=0 unit_exists=0
+
+    if [[ ! -x "/boot/dietpi/dietpi-software" ]]; then
+        echo_err "${MSG_WR}DietPi software manager is unavailable at /boot/dietpi/dietpi-software. No installation was attempted.${NC}"
+        exit 1
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+        echo_err "${MSG_WR}systemctl is unavailable, so the installation cannot be verified safely.${NC}"
+        exit 1
+    fi
+
+    software_state="$(dietpi_qbt_software_state)"
+    command_name="$(dietpi_qbt_install_command "$software_state")"
+
+    echo_err
+    echo_err "${YELLOW}======================================================================${NC}"
+    echo_err "${DB_YELLOW}                   DIETPI QBITTORRENT INSTALLATION                     ${NC}"
+    echo_err "${YELLOW}======================================================================${NC}"
+    if [[ "$command_name" == "reinstall" ]]; then
+        echo_err "  DietPi marks qBittorrent software ID 46 as installed, but the"
+        echo_err "  expected executable/service is missing or incomplete."
+        echo_err "  DietPi will be asked to repair/reinstall software ID 46."
+    else
+        echo_err "  qBittorrent is missing. DietPi will install software ID 46."
+    fi
+    echo_err "  Command: /boot/dietpi/dietpi-software $command_name 46"
+    echo_err "  The updater will not download or replace a static binary in this step."
+    echo_err "${YELLOW}----------------------------------------------------------------------${NC}"
+
+    if ! confirm_action "Run DietPi's $command_name command for qBittorrent (ID 46) now?"; then
+        echo_err "${MSG_WY}Installation/repair declined. No update was attempted.${NC}"
+        return 1
+    fi
+
+    echo_err "${MSG_IG}Running DietPi qBittorrent $command_name...${NC}"
+    if ! /boot/dietpi/dietpi-software "$command_name" 46; then
+        echo_err "${MSG_WR}DietPi reported an installation/repair failure. No updater binary replacement was attempted. Review the DietPi output before rerunning.${NC}"
+        exit 1
+    fi
+
+    [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
+    if systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then unit_exists=1; fi
+    if [[ "$(qbt_component_mode "$binary_exists" "$unit_exists")" != "present" ]]; then
+        echo_err "${MSG_WR}DietPi's command returned, but qBittorrent is still incomplete (binary=$binary_exists, service=$unit_exists). No update will be offered. Inspect DietPi's output and repair the installation first.${NC}"
+        exit 1
+    fi
+
+    echo_err "${MSG_IG}DietPi qBittorrent installation/repair verified. Returning to the main menu; choose Update when ready.${NC}"
+    return 0
+}
+
 detect_qbt_component_mode() {
     local binary_exists=0 unit_exists=0
     [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
@@ -1580,7 +1632,17 @@ main() {
     fi
 
     local action
-    action="$(get_main_menu_choice)"
+    while true; do
+        action="$(get_main_menu_choice)"
+        [[ "$action" == "install" ]] || break
+        # Installation is a separate, explicit action. Once DietPi succeeds,
+        # show the menu again; do not silently continue into a binary update.
+        if ! install_qbittorrent_via_dietpi; then
+            echo_err "${MSG_IG}Exited without updating qBittorrent.${NC}"
+            exit 0
+        fi
+    done
+
     case "$action" in
         exit)
             echo_err "\n${MSG_IG}Exited without making changes.${NC}"
@@ -1612,40 +1674,18 @@ main() {
             ;;
     esac
 
-    # Check the executable and service unit independently.
-    echo_n_err "\n        ${GREEN}- Detecting qBitTorrent installation...                    ${NC}"
+    # The main menu only returns "update" when both components exist. Keep
+    # this independent guard in case the installation changes after selection.
+    echo_n_err "\n        ${GREEN}- Rechecking qBitTorrent installation...                    ${NC}"
     local binary_exists=0 unit_exists=0
     [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] && binary_exists=1
     systemctl cat "$QBT_SERVICE" >/dev/null 2>&1 && unit_exists=1
-    if (( binary_exists == 1 && unit_exists == 1 )); then
-        echo_err "${DB_GREEN} PRESENT ${NC}"
-    elif (( binary_exists == 0 && unit_exists == 0 )); then
-        echo_err "${DB_RED} ABSENT  ${NC}\n"
-        echo_err
-        echo_err "  qBittorrent was not detected on this DietPi installation."
-        echo_err "  The DietPi software installer will install package/software ID 46."
-        echo_err "  This is a separate action from installing the updater's helper tools."
-        echo_err
-        if confirm_action "Install qBittorrent through DietPi now?"; then
-            echo_err
-            echo_err "${MSG_IG}Installing ${LBLUE}qBittorrent${NC} ${GREEN}through DietPi...${NC}"
-            if ! /boot/dietpi/dietpi-software install 46; then
-                echo_err "\n${MSG_WR}DietPi reported an installation failure. The updater will not attempt a binary replacement. Review the DietPi installer output and repair any partial installation before rerunning.${NC}"
-                exit 1
-            fi
-            if ! [[ -f "$BIN_PATH" && -x "$BIN_PATH" ]] || ! systemctl cat "$QBT_SERVICE" >/dev/null 2>&1; then
-                echo_err "\n${MSG_WR}Installation returned, but the expected executable or service unit is missing.${NC}"
-                exit 1
-            fi
-        else
-            echo_err "\n${MSG_WY}qBittorrent installation declined. No update was performed.${NC}\n"
-            exit 0
-        fi
-    else
-        echo_err "${DB_RED} INCONSISTENT ${NC}\n"
-        echo_err "${MSG_WR}Only one expected component (binary or systemd unit) exists. Repair the DietPi installation before updating.${NC}"
+    if [[ "$(qbt_component_mode "$binary_exists" "$unit_exists")" != "present" ]]; then
+        echo_err "${DB_RED} INCOMPLETE ${NC}"
+        echo_err "${MSG_WR}The qBittorrent executable/service changed after the menu was displayed. No update will be attempted. Rerun the script to install or repair via DietPi first.${NC}"
         exit 1
     fi
+    echo_err "${DB_GREEN} PRESENT ${NC}"
     local service_execstart
     service_execstart="$(systemctl show -p ExecStart --value "$QBT_SERVICE" 2>/dev/null || true)"
     if [[ "$service_execstart" != *"$BIN_PATH"* ]]; then
