@@ -65,11 +65,9 @@ readonly ULINE='\033[4m'
 readonly BOLD='\033[1m'
 
 # Helpers
-readonly MSG_WG=" ${B_RED} WARN ${NC} - ${LGREEN}"
 readonly MSG_WR=" ${B_RED} WARN ${NC} - ${LRED}"
 readonly MSG_WY=" ${B_RED} WARN ${NC} - ${LYELLOW}"
 readonly MSG_IG=" ${B_CYAN} INFO ${NC} - ${LGREEN}"
-readonly MSG_IR=" ${B_CYAN} INFO ${NC} - ${LRED}"
 
 ################################################################
 # SYSTEM FUNCTIONS
