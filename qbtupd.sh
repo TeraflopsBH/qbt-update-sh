@@ -525,7 +525,7 @@ dietpi_qbt_software_state() {
         return 0
     fi
     while IFS= read -r line || [[ -n "$line" ]]; do
-        if [[ "$line" =~ ^[[:space:]]*id[[:space:]]+46[[:space:]]*\|[[:space:]]*=?([0-9]+)[[:space:]]*\| ]]; then
+        if [[ "$line" =~ ^[[:space:]]*[iI][dD][[:space:]]+46[[:space:]]*\|[[:space:]]*=?([0-9]+)[[:space:]]*\| ]]; then
             printf '%s\n' "${BASH_REMATCH[1]}"
             return 0
         fi
