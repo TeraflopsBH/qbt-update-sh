@@ -1471,4 +1471,6 @@ main() {
     perform_update "$final_url" "$latest_ver" "$arch"
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
