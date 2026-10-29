@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-# shellcheck source=../qbtupd.sh
+# shellcheck source=qbtupd.sh
 source "$SCRIPT_DIR/qbtupd.sh"
 
 assert_state() {
