@@ -4,7 +4,8 @@ on:
   push:
     branches:
       - main
-      - 'fix/**'\n      - 'feature/**'
+      - 'fix/**'
+      - 'feature/**'
   pull_request:
     branches:
       - main
@@ -38,3 +39,6 @@ jobs:
 
       - name: Test status badge formatting
         run: bash tests/test_status_formatting.sh
+
+      - name: Test piped execution and sourcing
+        run: bash tests/test_pipe_execution.sh
