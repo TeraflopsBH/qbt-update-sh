@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - 'fix/**'
+      - 'fix/**'\n      - 'feature/**'
   pull_request:
     branches:
       - main
@@ -28,7 +28,7 @@ jobs:
         run: bash -n qbtupd.sh
 
       - name: Run ShellCheck
-        run: shellcheck -x qbtupd.sh tests/test_dietpi_software_state.sh tests/test_menu_cancellation.sh tests/test_status_formatting.sh
+        run: shellcheck -x qbtupd.sh tests/test_dietpi_software_state.sh tests/test_menu_cancellation.sh tests/test_status_formatting.sh tests/test_pipe_execution.sh
 
       - name: Test DietPi software state parsing
         run: bash tests/test_dietpi_software_state.sh
