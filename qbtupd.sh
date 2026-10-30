@@ -1826,6 +1826,9 @@ main() {
 }
 
 
-if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+# When executed from a file, run normally. When Bash reads this script from stdin
+# (for example, curl ... | sudo bash), BASH_SOURCE[0] is empty. Keep the
+# non-empty/different case sourced so tests and callers can load our functions.
+if [[ "${BASH_SOURCE[0]:-}" == "$0" || -z "${BASH_SOURCE[0]:-}" ]]; then
     main "$@"
 fi
