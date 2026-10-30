@@ -17,7 +17,7 @@ sed 's/^    main "\$@"$/    printf MAIN_INVOKED/' "$ROOT_DIR/qbtupd.sh" > "$TEST
 [[ -s "$TEST_TMP_DIR/qbtupd.sh" ]] || fail "could not prepare execution fixture"
 
 # A file passed on stdin must execute the main-entry block.
-pipe_output="$(cat "$TEST_TMP_DIR/qbtupd.sh" | bash 2>&1)"
+pipe_output="$(bash -c 'cat "$1" | bash' _ "$TEST_TMP_DIR/qbtupd.sh" 2>&1)"
 [[ "$pipe_output" == *"MAIN_INVOKED"* ]] ||
     fail "piped execution did not invoke main"
 
