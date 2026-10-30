@@ -77,7 +77,17 @@ less qbtupd.sh
 sudo bash qbtupd.sh
 ```
 
-### Option 2: manual download
+### Option 2: run directly from a pipe
+
+After reviewing the source, you can also execute the current `main`-branch script directly from standard input:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TeraflopsBH/qbt-update-sh/main/qbtupd.sh | sudo bash
+```
+
+The script reads interactive confirmations and menu selections from `/dev/tty`, not from standard input, so the pipe is not consumed by prompts. Run this only from an interactive terminal. As with any remote-script execution, inspect and trust the source before running it as root.
+
+### Option 3: manual download
 
 1. Download `qbtupd.sh` from the repository.
 2. Review the contents.
@@ -102,7 +112,7 @@ sudo bash qbtupd.sh
 
 ## Testing status
 
-The script changes should be checked with `bash -n qbtupd.sh`, ShellCheck, `tests/test_dietpi_software_state.sh`, `tests/test_menu_cancellation.sh`, and `tests/test_status_formatting.sh`, which verifies that INFO, OK, WARN, and FAIL badges have consistent fixed-width labels. Then test in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
+The script changes should be checked with `bash -n qbtupd.sh`, the piped-execution/sourcing regression test, ShellCheck, `tests/test_dietpi_software_state.sh`, `tests/test_menu_cancellation.sh`, and `tests/test_status_formatting.sh`, which verifies that INFO, OK, WARN, and FAIL badges have consistent fixed-width labels. Then test in a disposable DietPi environment before using them on a live installation. In particular, test install-first routing, successful DietPi install/reinstall, HTTP failures, malformed metadata, wrong-architecture downloads, paired-config restore, legacy backups without paired configs, configuration changes after restore, config-recovery fallback, the DietPi uninstall command, and service-start failure. Do not assume a successful shell syntax check proves the updater works on every DietPi version.
 
 ## Upstream project
 
